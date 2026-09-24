@@ -1,0 +1,14 @@
+{
+  "id": "aops",
+  "name": "Agent Operations",
+  "description": "See everything your agents do, especially what they change in the real world.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "endpoint": { "type": "string", "description": "Collector URL (default http://127.0.0.1:4319)" },
+      "captureContent": { "type": "boolean", "description": "Record prompts, tool arguments and results (default true). Data stays on the local collector." },
+      "enabled": { "type": "boolean" }
+    }
+  }
+}

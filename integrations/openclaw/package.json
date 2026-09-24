@@ -1,0 +1,14 @@
+{
+  "name": "@aops/openclaw-plugin",
+  "version": "0.1.0",
+  "description": "Agent Operations for OpenClaw: records every LLM call, tool call, subagent and external change to the local aops collector",
+  "type": "module",
+  "main": "index.ts",
+  "openclaw": {
+    "extensions": ["./index.ts"]
+  },
+  "scripts": {
+    "test": "node --test test/*.test.ts"
+  },
+  "license": "MIT"
+}
