@@ -4,6 +4,17 @@ Service behavior is versioned separately by date (`toolsim versions`); this file
 
 ## Unreleased
 
+- **Real clients, unmodified:** an HTTPS gateway (`toolsim serve --gateway PORT`) serves the Gmail,
+  Calendar, Drive, Sheets, Docs, People, OAuth and GitHub (REST + GraphQL) APIs from the simulated
+  worlds. Verified with `gog` (OpenClaw), Hermes' `google_api.py` (Google's Python client) and `gh`.
+- **GitHub Actions:** CI runs are workflow runs with jobs, steps, logs (the zip `gh run view
+  --log-failed` reads) and re-runs.
+- **Contacts:** Google Contacts per mailbox (My Contacts, other contacts, directory).
+- **Gmail `2026-09-25.3`:** Gmail's whole search language (grouping, `{a b}`, grouped operator values,
+  whole words, sizes, categories, Pacific-time dates).
+- **Wall-clock worlds:** `now: wallclock` starts a world now, moving seeded dates by whole weeks
+  (default with the gateway, which also runs worlds in real time).
+
 - **One company across tools** (new service versions; older ones unchanged):
   - Gmail `2026-09-25.2`: every company address has a mailbox, and seeded mail between them is in
     both (John's Sent has what he sent Alex).

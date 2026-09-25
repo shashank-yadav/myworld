@@ -9,6 +9,7 @@ from ...core.tools import ToolError, tool
 from .delivery import _send
 from .model import _check_labels, _get, _invalid, _label_by_name, _mb, _new_label, _not_found, _store
 from .search import _matches
+from .search_full import matches as full_matches
 
 
 @tool("send_email", destructive=False)
@@ -90,7 +91,8 @@ def search_emails(ctx: Instance,
     lag = s.get("_index_lag", 0)
     cutoff = int((ctx.now().timestamp() - lag) * 1000) if lag else None
     since = s.get("_index_lag_since", 0)
-    hits = [m for m in s["messages"].values() if _matches(s, m, query, ctx.now())
+    match = full_matches if ctx.state.get("_v3") else _matches  # 2026-09-25.3: Gmail's whole search language
+    hits = [m for m in s["messages"].values() if match(s, m, query, ctx.now())
             and (cutoff is None or int(m["internalDate"]) <= since or int(m["internalDate"]) <= cutoff)]
     hits.sort(key=lambda m: int(m["internalDate"]), reverse=True)
     hits = hits[: maxResults or 10]

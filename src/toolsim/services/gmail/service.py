@@ -7,7 +7,7 @@ from email.utils import parseaddr
 from typing import Any
 
 from ...core.instance import Instance, Service
-from .model import V1, V2, _addr, _list, _mb, _new_mailbox, _store
+from .model import V1, V2, V3, _addr, _list, _mb, _new_mailbox, _store
 
 
 def _mirror(ctx: Instance, state: dict[str, Any]) -> None:
@@ -39,7 +39,10 @@ class Gmail(Service):
     versions = {"2026-09-25": "Initial release: 19 tools modeled on GongRzhe/Gmail-MCP-Server.",
                 V1: "Bounces for unknown/typo'd recipients, out-of-office and colleague auto-replies, daily send quota.",
                 V2: "A company mail system: every known address at the company's domains has a mailbox, so any "
-                    "colleague can have an agent and mail between colleagues lands in both inboxes."}
+                    "colleague can have an agent and mail between colleagues lands in both inboxes.",
+                V3: "Gmail's whole search language in search_emails: ( ) grouping, OR and {a b}, grouped operator "
+                    "values (from:(a OR b)), whole-word matching (plan doesn't find planning), larger:/smaller:, "
+                    "category:, has:userlabels, rfc822msgid:, and after:/before: in Pacific time."}
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -68,6 +71,11 @@ class Gmail(Service):
             c("search_emails", {"query": "subject:lunch"}, as_="john@acme.com")
             c("send_email", {"to": ["alex@acme.com"], "subject": "Re: Lunch?", "body": "Yes!"}, as_="john@acme.com")
             c("search_emails", {"query": "from:john subject:lunch"})
+        if ctx.at_least(V3):
+            c("search_emails", {"query": "from:(john OR priya) -in:sent"})
+            c("search_emails", {"query": "plan"})
+            c("search_emails", {"query": "{has:attachment larger:1M} category:primary"})
+            c("search_emails", {"query": "subject:\"launch checklist\" after:2026/09/01"})
 
     def default_seed(self) -> dict[str, Any]:
         return {
@@ -123,6 +131,8 @@ class Gmail(Service):
                     own = (seed.get("company_mail") or {}).get(addr, [])  # generated: their own background mail
                     state["mailboxes"][addr] = _new_mailbox(ctx, {"emails": own}, user)
             _mirror(ctx, state)
+        if ctx.at_least(V3):
+            state["_v3"] = True
         state["_auto_replies"] = list(seed.get("auto_replies", []))
         state["_daily_send_limit"] = int(seed.get("daily_send_limit", 2000))
         state["_ooo_sent"] = []

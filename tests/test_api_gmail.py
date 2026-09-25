@@ -162,3 +162,20 @@ def test_the_gateway_speaks_real_tls(tmp_path):
             blocked.request("GET", "/")
     finally:
         host.gateway.stop()
+
+
+def test_gmail_search_language(api):
+    _, alex, _ = api
+    count = lambda q: alex("GET", "messages", params={"q": q}).json()["resultSizeEstimate"]  # noqa: E731
+    assert count("from:(john OR priya)") == count("from:john") + count("from:priya") > 0
+    assert count("{from:john from:priya}") == count("from:(john OR priya)")
+    assert count("plan") != count("plann"), "whole words: 'plann' matches nothing"
+    assert count("plann") == 0
+    assert count('subject:"launch checklist"') == 2 and count("subject:(launch checklist)") == 2
+    assert count("has:attachment larger:10K") == 1 and count("has:attachment larger:10M") == 0
+    assert count("category:primary") < count("in:inbox")
+    assert count("after:2026/09/19 before:2026/09/20") == 2, "Pacific days: 23:00 PT on the 19th is the 20th in UTC"
+    assert count("-in:inbox") == count("in:sent") + count("in:drafts") - count("in:sent in:inbox")
+    rid = alex("GET", "messages", params={"q": "from:john", "format": "raw"}).json()["messages"][0]["id"]
+    mid = next(h["value"] for h in alex("GET", f"messages/{rid}").json()["payload"]["headers"] if h["name"] == "Message-ID")
+    assert count(f"rfc822msgid:{mid}") == 1

@@ -22,7 +22,7 @@ from ...api.google import b64url, error, page, select, unb64url
 from ...core.instance import Instance
 from .delivery import _send
 from .model import SYSTEM_LABELS, _addr, _label_by_name, _new_label, _store
-from .search import _matches
+from .search_full import matches as _matches
 
 HOSTS = ("gmail.googleapis.com", "www.googleapis.com")
 BASE = "/gmail/v1/users/{userId}"

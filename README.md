@@ -304,6 +304,44 @@ No accounts or API access are needed. Options:
 
 The resulting seed files drop into any environment with `seed_file:`.
 
+## Real clients: gog, gh, Hermes, OpenClaw
+
+Agents like OpenClaw and Hermes don't call MCP servers for Google and GitHub; they run CLIs
+(`gog`, `gh`) or Google's client libraries. toolsim serves the real APIs, so those run unmodified:
+
+| API | Hosts | What's there |
+|---|---|---|
+| Gmail v1 | `gmail.googleapis.com`, `www.googleapis.com` | messages (minimal/metadata/full/raw MIME), threads, send/insert from RFC 2822, drafts, labels with counts, history, filters, send-as, attachments; Gmail's whole search language |
+| Calendar v3 | `www.googleapis.com` | events (series vs `singleEvents`, instances, patch/update/delete/move), `sendUpdates`, Meet links, all-day events, calendarList, settings, colors, freeBusy |
+| Drive v3 | `www.googleapis.com` | files (list/get/export/create/update/copy/delete), multipart, media and resumable uploads, permissions, about |
+| Sheets v4, Docs v1 | `sheets.googleapis.com`, `docs.googleapis.com` | values get/update/append/clear and batches, spreadsheets batchUpdate; documents get/create/batchUpdate with UTF-16 indexes |
+| People v1 | `people.googleapis.com` | My Contacts, other contacts, the company directory, search (with Google's warm-up cache) |
+| OAuth | `oauth2.googleapis.com` | token refresh, userinfo, tokeninfo |
+| GitHub v3 + GraphQL | `api.github.com` | repos, refs, contents, issues, pull requests (diffs), statuses/checks, Actions runs/jobs/logs/re-runs, search, GraphQL for `gh` |
+
+Calls are recorded under the API's method ids (`gmail.users.messages.send`, `github.graphql`,
+`drive.files.create`), so checks, faults and notifications work as with MCP tools.
+
+```bash
+uv sync --extra gateway
+uv run toolsim serve --env envs/schedule-with-john.yaml --gateway 8443
+# prints, per agent:  export HTTPS_PROXY=... SSL_CERT_FILE=... GOG_ACCESS_TOKEN=... GOG_ACCOUNT=... GH_TOKEN=...
+gog gmail search 'is:unread' --max 10      # in the agent's sandbox, with those variables
+gh pr checks 4 --repo acme/api
+```
+
+- **How:** the gateway is an HTTPS proxy with its own CA. It answers for the Google APIs and
+  `api.github.com` from the agent's environment and tunnels everything else (or refuses it:
+  `--no-passthrough`). Each agent gets signed tokens for its identity; `POST /envs` returns them
+  under `credentials`, with a ready-made `google_authorized_user` for Google's Python libraries.
+- **Clock:** real clients read the machine's clock, so with the gateway a world starts at the
+  wall-clock time (`now: wallclock`) and runs in real time. Seeded dates move by whole weeks, so
+  weekdays and times of day stay right; the alternative is to set the sandbox's clock to the world's.
+- **Without a proxy:** `http://<host>/gw/<api host>/<path>` serves the same APIs directly.
+- **Known gaps:** `git push`/`git clone` (git's own protocol) isn't simulated; use the API
+  (`gh api .../contents`). Python's httplib2 (Google's client) honors `HTTPS_PROXY` only with
+  `pysocks` installed.
+
 ## Run and deploy
 
 ```bash
@@ -331,12 +369,14 @@ State lives in memory in one process: snapshots are for branching, not durabilit
 ```
 src/toolsim/
   core/          the engine: instances, clock, tools and validation, faults, MCP
-  services/      one package per tool: service, model, tools by area, world actions, noise, importer
+  services/      one package per tool: service, model, tools by area, REST api, world actions, noise, importer
   env.py         environments, runs, checks and grading
   issues.py      the issue library
   noise.py       shared pools for generated worlds; dispatches to each tool's noise.py
   importers/     the import registry and shared options
   rl/            episodes (ToolEnv), parallel pool (EnvPool), task families (rl/tasks/)
+  api/           REST surfaces: routing, Google helpers, the HTTP handler, a GraphQL executor
+  gateway/       the HTTPS gateway (CA, proxy) for real clients
   host.py        HTTP host (MCP endpoints and control API)
   cli.py         toolsim ...
   frozen/        fingerprints of every released service version

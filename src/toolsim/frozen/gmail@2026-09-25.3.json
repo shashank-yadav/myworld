@@ -1,0 +1,681 @@
+{
+ "behavior_sha256": "36eb45f54a117643a4ffd35e9d9782142c900684add6430549b6da3892d52ba1",
+ "changelog": "Gmail's whole search language in search_emails: ( ) grouping, OR and {a b}, grouped operator values (from:(a OR b)), whole-word matching (plan doesn't find planning), larger:/smaller:, category:, has:userlabels, rfc822msgid:, and after:/before: in Pacific time.",
+ "probe_calls": 25,
+ "service": "gmail",
+ "tools": [
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Sends a new email",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "attachments": {
+      "description": "List of file paths to attach",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "bcc": {
+      "description": "List of BCC recipients",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "body": {
+      "description": "Email body content (used for text/plain or when htmlBody not provided)",
+      "type": "string"
+     },
+     "cc": {
+      "description": "List of CC recipients",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "htmlBody": {
+      "description": "HTML version of the email body",
+      "type": "string"
+     },
+     "inReplyTo": {
+      "description": "Message ID being replied to",
+      "type": "string"
+     },
+     "mimeType": {
+      "description": "Email content type",
+      "enum": [
+       "text/plain",
+       "text/html",
+       "multipart/alternative"
+      ],
+      "type": "string"
+     },
+     "subject": {
+      "description": "Email subject",
+      "type": "string"
+     },
+     "threadId": {
+      "description": "Thread ID to reply to",
+      "type": "string"
+     },
+     "to": {
+      "description": "List of recipient email addresses",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     }
+    },
+    "required": [
+     "to",
+     "subject",
+     "body"
+    ],
+    "type": "object"
+   },
+   "name": "send_email"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Draft a new email",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "attachments": {
+      "description": "List of file paths to attach",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "bcc": {
+      "description": "List of BCC recipients",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "body": {
+      "description": "Email body content",
+      "type": "string"
+     },
+     "cc": {
+      "description": "List of CC recipients",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "htmlBody": {
+      "description": "HTML version of the email body",
+      "type": "string"
+     },
+     "inReplyTo": {
+      "description": "Message ID being replied to",
+      "type": "string"
+     },
+     "mimeType": {
+      "description": "Email content type",
+      "enum": [
+       "text/plain",
+       "text/html",
+       "multipart/alternative"
+      ],
+      "type": "string"
+     },
+     "subject": {
+      "description": "Email subject",
+      "type": "string"
+     },
+     "threadId": {
+      "description": "Thread ID to reply to",
+      "type": "string"
+     },
+     "to": {
+      "description": "List of recipient email addresses",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     }
+    },
+    "required": [
+     "to",
+     "subject",
+     "body"
+    ],
+    "type": "object"
+   },
+   "name": "draft_email"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Retrieves the content of a specific email",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "messageId": {
+      "description": "ID of the email message to retrieve",
+      "type": "string"
+     }
+    },
+    "required": [
+     "messageId"
+    ],
+    "type": "object"
+   },
+   "name": "read_email"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Downloads an email attachment to a specified location",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "attachmentId": {
+      "description": "ID of the attachment to download",
+      "type": "string"
+     },
+     "filename": {
+      "description": "Filename to save the attachment as",
+      "type": "string"
+     },
+     "messageId": {
+      "description": "ID of the email message containing the attachment",
+      "type": "string"
+     },
+     "savePath": {
+      "description": "Directory path to save the attachment",
+      "type": "string"
+     }
+    },
+    "required": [
+     "messageId",
+     "attachmentId"
+    ],
+    "type": "object"
+   },
+   "name": "download_attachment"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Searches for emails using Gmail search syntax",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "maxResults": {
+      "description": "Maximum number of results to return",
+      "type": "integer"
+     },
+     "query": {
+      "description": "Gmail search query (e.g., 'from:example@gmail.com')",
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ],
+    "type": "object"
+   },
+   "name": "search_emails"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Modifies email labels (move to different folders)",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "addLabelIds": {
+      "description": "List of label IDs to add to the message",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "labelIds": {
+      "description": "List of label IDs to apply",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "messageId": {
+      "description": "ID of the email message to modify",
+      "type": "string"
+     },
+     "removeLabelIds": {
+      "description": "List of label IDs to remove from the message",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     }
+    },
+    "required": [
+     "messageId"
+    ],
+    "type": "object"
+   },
+   "name": "modify_email"
+  },
+  {
+   "annotations": {
+    "destructiveHint": true,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Permanently deletes an email",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "messageId": {
+      "description": "ID of the email message to delete",
+      "type": "string"
+     }
+    },
+    "required": [
+     "messageId"
+    ],
+    "type": "object"
+   },
+   "name": "delete_email"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Retrieves all available Gmail labels",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+   },
+   "name": "list_email_labels"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Modifies labels for multiple emails in batches",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "addLabelIds": {
+      "description": "List of label IDs to add to all messages",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "batchSize": {
+      "default": 50,
+      "description": "Number of messages to process in each batch (default: 50)",
+      "type": "integer"
+     },
+     "messageIds": {
+      "description": "List of message IDs to modify",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "removeLabelIds": {
+      "description": "List of label IDs to remove from all messages",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     }
+    },
+    "required": [
+     "messageIds"
+    ],
+    "type": "object"
+   },
+   "name": "batch_modify_emails"
+  },
+  {
+   "annotations": {
+    "destructiveHint": true,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Permanently deletes multiple emails in batches",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "batchSize": {
+      "default": 50,
+      "description": "Number of messages to process in each batch (default: 50)",
+      "type": "integer"
+     },
+     "messageIds": {
+      "description": "List of message IDs to delete",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     }
+    },
+    "required": [
+     "messageIds"
+    ],
+    "type": "object"
+   },
+   "name": "batch_delete_emails"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Creates a new Gmail label",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "labelListVisibility": {
+      "description": "Visibility of the label in the label list",
+      "enum": [
+       "labelShow",
+       "labelShowIfUnread",
+       "labelHide"
+      ],
+      "type": "string"
+     },
+     "messageListVisibility": {
+      "description": "Whether to show or hide the label in the message list",
+      "enum": [
+       "show",
+       "hide"
+      ],
+      "type": "string"
+     },
+     "name": {
+      "description": "Name for the new label",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name"
+    ],
+    "type": "object"
+   },
+   "name": "create_label"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Updates an existing Gmail label",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "description": "ID of the label to update",
+      "type": "string"
+     },
+     "labelListVisibility": {
+      "description": "Visibility of the label in the label list",
+      "enum": [
+       "labelShow",
+       "labelShowIfUnread",
+       "labelHide"
+      ],
+      "type": "string"
+     },
+     "messageListVisibility": {
+      "description": "Whether to show or hide the label in the message list",
+      "enum": [
+       "show",
+       "hide"
+      ],
+      "type": "string"
+     },
+     "name": {
+      "description": "New name for the label",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "type": "object"
+   },
+   "name": "update_label"
+  },
+  {
+   "annotations": {
+    "destructiveHint": true,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Deletes a Gmail label",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "description": "ID of the label to delete",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "type": "object"
+   },
+   "name": "delete_label"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Gets an existing label by name or creates it if it doesn't exist",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "labelListVisibility": {
+      "description": "Visibility of the label in the label list",
+      "enum": [
+       "labelShow",
+       "labelShowIfUnread",
+       "labelHide"
+      ],
+      "type": "string"
+     },
+     "messageListVisibility": {
+      "description": "Whether to show or hide the label in the message list",
+      "enum": [
+       "show",
+       "hide"
+      ],
+      "type": "string"
+     },
+     "name": {
+      "description": "Name of the label to get or create",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name"
+    ],
+    "type": "object"
+   },
+   "name": "get_or_create_label"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Creates a new Gmail filter with custom criteria and actions",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "description": "Actions to perform on matching emails (addLabelIds, removeLabelIds, forward)",
+      "type": "object"
+     },
+     "criteria": {
+      "description": "Criteria for matching emails (from, to, subject, query, negatedQuery, hasAttachment, size, sizeComparison)",
+      "type": "object"
+     }
+    },
+    "required": [
+     "criteria",
+     "action"
+    ],
+    "type": "object"
+   },
+   "name": "create_filter"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Retrieves all Gmail filters",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+   },
+   "name": "list_filters"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Gets details of a specific Gmail filter",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "filterId": {
+      "description": "ID of the filter to retrieve",
+      "type": "string"
+     }
+    },
+    "required": [
+     "filterId"
+    ],
+    "type": "object"
+   },
+   "name": "get_filter"
+  },
+  {
+   "annotations": {
+    "destructiveHint": true,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Deletes a Gmail filter",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "filterId": {
+      "description": "ID of the filter to delete",
+      "type": "string"
+     }
+    },
+    "required": [
+     "filterId"
+    ],
+    "type": "object"
+   },
+   "name": "delete_filter"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Creates a filter using a pre-defined template for common scenarios",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "parameters": {
+      "description": "Template-specific parameters (senderEmail, subjectText, searchText, listIdentifier, sizeInBytes, labelIds, archive, markAsRead)",
+      "type": "object"
+     },
+     "template": {
+      "description": "Pre-defined filter template to use",
+      "enum": [
+       "fromSender",
+       "withSubject",
+       "withAttachments",
+       "largeEmails",
+       "containingText",
+       "mailingList"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "template",
+     "parameters"
+    ],
+    "type": "object"
+   },
+   "name": "create_filter_from_template"
+  }
+ ],
+ "version": "2026-09-25.3"
+}
