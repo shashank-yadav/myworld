@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 from toolsim.core import mcp
 from toolsim.core.instance import Instance
 from toolsim.env import Environment, EnvRun
-from toolsim.host import create_app
+from toolsim.host import HostConfig, create_app
 from toolsim.services import get_service
 
 ENVS = Path(__file__).parent.parent / "envs"
@@ -132,7 +132,7 @@ def test_truncated_and_duplicate_commit():
 
 
 def test_transport_errors_over_http_and_stdio():
-    c = TestClient(create_app())
+    c = TestClient(create_app(config=HostConfig(env_dirs=[ENVS])))
     c.post("/instances", json={"service": "slack", "id": "s", "faults": [{"kind": "transport_error", "status": 502}]})
     r = c.post("/instances/s/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
                                          "params": {"name": "slack_get_users", "arguments": {}}})
@@ -162,8 +162,8 @@ class Agent:
 
 
 def _start(env_file: str):
-    c = TestClient(create_app())
-    run = c.post("/envs", json={"file": str(ENVS / env_file), "id": "p"}).json()
+    c = TestClient(create_app(config=HostConfig(env_dirs=[ENVS])))
+    run = c.post("/envs", json={"file": env_file, "id": "p"}).json()
     return c, Agent(c, run["agents"]["agent"])
 
 

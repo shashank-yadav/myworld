@@ -67,7 +67,7 @@ class Environment:
     checks: list[dict[str, Any]] = field(default_factory=list)
     description: str = ""
     rng_seed: int = 0
-    base_dir: Path = Path(".")
+    base_dir: Path | None = Path(".")  # None: an inline spec, which may not read files
     agents: dict[str, dict[str, Any]] = field(default_factory=dict)
     now: str | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
@@ -75,10 +75,17 @@ class Environment:
     @classmethod
     def load(cls, path: str | Path) -> Environment:
         path = Path(path)
-        return cls.from_dict(yaml.safe_load(path.read_text()), base_dir=path.parent)
+        spec = _read_yaml(path)
+        if not isinstance(spec, dict):
+            raise ValueError(f"{path.name}: an environment file must be a mapping")
+        return cls.from_dict(spec, base_dir=path.parent)
 
     @classmethod
-    def from_dict(cls, spec: dict[str, Any], base_dir: Path = Path(".")) -> Environment:
+    def from_dict(cls, spec: dict[str, Any], base_dir: Path | None = Path(".")) -> Environment:
+        if not isinstance(spec, dict):
+            raise ValueError("an environment spec must be a mapping")
+        if not isinstance(spec.get("name"), str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}", spec["name"]):
+            raise ValueError("an environment needs a `name` (letters, digits, '.', '_' or '-')")
         from .issues import expand_issues
         spec = expand_issues(spec)  # `issues:` become events, faults and checks
         servers = spec.get("servers") or {}
@@ -127,9 +134,17 @@ class Environment:
         if "seed" in cfg:
             base = cfg["seed"]
         elif "seed_file" in cfg:
-            base = yaml.safe_load((self.base_dir / cfg["seed_file"]).read_text())
+            if self.base_dir is None:
+                raise ValueError(f"{server}: seed_file isn't allowed in inline specs; send the seed inline")
+            root = Path(self.base_dir).resolve()
+            path = (root / str(cfg["seed_file"])).resolve()
+            if not path.is_relative_to(root):
+                raise ValueError(f"{server}: seed_file must be inside the environment's directory")
+            base = _read_yaml(path)
         else:
             base = None
+        if base is not None and not isinstance(base, dict):
+            raise ValueError(f"{server}: a seed must be a mapping")
         if cfg.get("extend"):
             from .services import get_service
             base = _merge(base if base is not None else get_service(self.service_for(server)).default_seed(), cfg["extend"])
@@ -177,6 +192,18 @@ class Environment:
                             "expected": {k: c[k] for k in ("count", "min", "max") if k in c} or {"min": 1}})
         return {"environment": self.name, "passed": all(r["passed"] for r in results),
                 "score": sum(r["passed"] for r in results) / len(results) if results else 1.0, "checks": results}
+
+
+def _read_yaml(path: Path) -> Any:
+    """Load YAML/JSON without ever echoing file content in errors."""
+    try:
+        return yaml.safe_load(path.read_text())
+    except yaml.YAMLError as e:
+        mark = getattr(e, "problem_mark", None)
+        where = f" (line {mark.line + 1})" if mark is not None else ""
+        raise ValueError(f"{path.name}: invalid YAML{where}") from None
+    except UnicodeDecodeError:
+        raise ValueError(f"{path.name}: not a text file") from None
 
 
 TRIGGERS = ("at", "before", "after", "after_calls")

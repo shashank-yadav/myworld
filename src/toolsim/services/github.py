@@ -53,7 +53,7 @@ def _unprocessable(message: str, errors: list[dict[str, Any]] | None = None) -> 
 
 def blob_sha(content: str) -> str:
     data = content.encode()
-    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+    return hashlib.sha1(b"blob %d\0" % len(data) + data, usedforsecurity=False).hexdigest()  # git's object id
 
 
 class GitHub(Service):
@@ -221,7 +221,7 @@ def _commit(ctx: Instance, state: dict[str, Any], repo: dict[str, Any], tree: di
             message: str, author: str) -> str:
     when = _iso(ctx)
     raw = f"tree {sorted(tree.items())}\nparents {parents}\nauthor {author} {when}\n\n{message}".encode()
-    sha = hashlib.sha1(raw).hexdigest()
+    sha = hashlib.sha1(raw, usedforsecurity=False).hexdigest()
     u = state["users"].get(author) or _user(ctx, state, author)
     repo["commits"][sha] = {"sha": sha, "message": message, "tree": tree, "parents": parents,
                             "author": {"name": u["name"], "email": f"{author}@users.noreply.github.com", "date": when,

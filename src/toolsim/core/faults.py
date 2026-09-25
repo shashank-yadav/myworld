@@ -96,7 +96,15 @@ class Fault:
 
 
 def parse_faults(specs: list[dict[str, Any]] | None) -> list[Fault]:
-    return [Fault(**{k: v for k, v in s.items() if k not in ("fired", "seen", "server")}) for s in specs or []]
+    out = []
+    for s in specs or []:
+        if not isinstance(s, dict):
+            raise ValueError("each fault must be an object")
+        try:
+            out.append(Fault(**{k: v for k, v in s.items() if k not in ("fired", "seen", "server")}))
+        except TypeError as e:
+            raise ValueError(f"invalid fault {s!r}: {e}") from None
+    return out
 
 
 def _when(value: str, start: dt.datetime) -> dt.datetime:

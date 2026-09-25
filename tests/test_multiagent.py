@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 import pytest
 from fastapi.testclient import TestClient
 
-from toolsim.host import create_app
+from toolsim.host import HostConfig, create_app
 
 ENVS = Path(__file__).parent.parent / "envs"
 
@@ -38,8 +38,8 @@ class Agent:
 
 @pytest.fixture
 def world():
-    c = TestClient(create_app())
-    run = c.post("/envs", json={"file": str(ENVS / "schedule-with-john.yaml"), "id": "w"}).json()
+    c = TestClient(create_app(config=HostConfig(env_dirs=[ENVS])))
+    run = c.post("/envs", json={"file": "schedule-with-john.yaml", "id": "w"}).json()
     return c, Agent(c, run["agents"]["alex"]), Agent(c, run["agents"]["john"])
 
 
@@ -127,7 +127,7 @@ def test_snapshot_restore_and_fork_the_whole_world(world):
 
 
 def test_identities_are_checked():
-    c = TestClient(create_app())
+    c = TestClient(create_app(config=HostConfig(env_dirs=[ENVS])))
     bad = {"name": "x", "servers": {"gmail": {}}, "agents": {"eve": {"as": "eve@evil.io"}}}
     r = c.post("/envs", json={"spec": bad})
     assert r.status_code == 400 and "no mailbox for eve@evil.io" in r.json()["detail"]
@@ -135,14 +135,14 @@ def test_identities_are_checked():
     url = urlsplit(ok["agents"]["agent"]["mcpServers"]["gmail"]["url"])
     r = c.post(f"{url.path}?agent=eve&as=eve@evil.io", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     assert r.status_code == 403
-    with pytest.raises(Exception):
-        from toolsim.env import Environment
+    from toolsim.env import Environment
+    with pytest.raises(ValueError, match="unknown server"):
         Environment.from_dict({"name": "z", "servers": {"gmail": {}}, "agents": {"a": {"servers": ["slack"]}}})
 
 
 def test_single_agent_envs_still_work():
-    c = TestClient(create_app())
-    run = c.post("/envs", json={"file": str(ENVS / "merge-when-green.yaml"), "id": "m"}).json()
+    c = TestClient(create_app(config=HostConfig(env_dirs=[ENVS])))
+    run = c.post("/envs", json={"file": "merge-when-green.yaml", "id": "m"}).json()
     assert list(run["agents"]) == ["agent"]
     a = Agent(c, run["agents"]["agent"])
     a.call("github", "get_pull_request_status", owner="acme", repo="api", pull_number=4)

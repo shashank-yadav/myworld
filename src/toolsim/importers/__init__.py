@@ -20,13 +20,24 @@ from typing import Any, Callable
 from . import calendar, drive, github, gmail, jira, slack
 from .common import ImportOptions
 
-IMPORTERS: dict[str, Callable[..., dict[str, Any]]] = {
+def _checked(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
+    """Fail with a clear message on a missing path, and never create files at the source path."""
+    def run(path: Any, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        from pathlib import Path
+        if not Path(path).exists():
+            raise ValueError(f"no such file or folder: {path}")
+        return fn(path, *args, **kwargs)
+    run.__signature__ = __import__("inspect").signature(fn)  # type: ignore[attr-defined]
+    return run
+
+
+IMPORTERS: dict[str, Callable[..., dict[str, Any]]] = {name: _checked(fn) for name, fn in {
     "gmail": gmail.import_mbox,
     "calendar": calendar.import_ics,
     "slack": slack.import_export,
     "github": github.import_repo,
     "jira": jira.import_export,
     "drive": drive.import_folder,
-}
+}.items()}
 
 __all__ = ["IMPORTERS", "ImportOptions"]

@@ -57,7 +57,7 @@ def import_mbox(path: str | Path, opts: ImportOptions | None = None, *, owner: s
                 owner_name: str | None = None) -> dict[str, Any]:
     """``owner``: the mailbox owner's address (default: the most frequent sender of SENT mail)."""
     opts = opts or ImportOptions()
-    box = mailbox.mbox(str(path))
+    box = mailbox.mbox(str(path), create=False)
     raw = []
     for msg in box:
         try:

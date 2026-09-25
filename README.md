@@ -203,6 +203,32 @@ mcp_servers:
 The host's control API (`/docs`) creates, resets, snapshots, restores and forks instances, and reads
 their state and call logs. It's built for test harnesses and RL loops.
 
+## Deploying
+
+```bash
+docker build -t toolsim .
+docker run -e TOOLSIM_TOKEN=change-me -p 8765:8765 toolsim     # serves envs/ via POST /envs {"file": ...}
+```
+
+Or run it directly: `toolsim serve --host 0.0.0.0 --token $TOKEN --env-dir envs/`.
+
+Security model:
+- **Authentication:** with a token set, every request needs `Authorization: Bearer <token>` (or
+  `?token=` for MCP clients that only take a URL), except `/healthz`. The host refuses to bind beyond
+  localhost without a token unless you pass `--no-auth`.
+- **Origin checks:** browser requests must come from localhost or an origin allowed with `--allow-origin`
+  (the MCP spec's DNS-rebinding guidance). Non-browser clients send no Origin and aren't affected.
+- **Files:** environment files load over the API only from `--env-dir` directories. Inline specs can't
+  reference files, `seed_file` can't leave its environment's directory, and parse errors never echo
+  file content.
+- **Limits:** instances (`--max-instances`), snapshots (the oldest are evicted), fault delays
+  (`--max-hang`), and request size.
+- **State:** everything lives in memory in one process. Snapshots are for branching runs, not
+  durability, and restarting the host clears all instances.
+
+Operations: `GET /healthz`, JSON error bodies with a reference id (the details are in the logs),
+`--log-level`. CI runs lint, the tests on Python 3.11 to 3.13, the frozen-version check, and a build.
+
 ## Status
 
 - Verified with Hermes's MCP client (stdio and HTTP) and with the official MCP Python SDK client.

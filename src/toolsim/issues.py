@@ -237,7 +237,7 @@ def expand_issues(spec: dict[str, Any]) -> dict[str, Any]:
         return spec
     spec = copy.deepcopy(spec)
     servers = set(spec.get("servers") or {})
-    for n, item in enumerate(spec["issues"]):
+    for item in spec["issues"]:
         name = item.get("use") if isinstance(item, dict) else item
         if name not in ISSUES:
             raise ValueError(f"unknown issue {name!r}; available: {', '.join(sorted(ISSUES))}")

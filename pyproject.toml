@@ -1,13 +1,21 @@
 [project]
 name = "toolsim"
-version = "0.1.0"
+version = "0.2.0"
 description = "Simulated replicas of real tools (Gmail, Calendar, Slack, GitHub, ...) for testing and training AI agents"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.115",
-    "uvicorn>=0.30",
-    "pyyaml>=6.0",
+    "fastapi>=0.115,<1",
+    "uvicorn>=0.30,<1",
+    "pyyaml>=6.0,<7",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
 ]
 
 [project.scripts]
@@ -18,6 +26,15 @@ module-name = "toolsim"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning:starlette.*", "ignore:Using `httpx`"]
+
+[tool.ruff]
+line-length = 130
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E9", "F", "B", "PLE", "S", "SIM"]
+ignore = ["S101", "S311", "S603", "S607", "S104", "SIM108", "SIM102", "SIM105", "B008", "B905", "S108", "S324"]
 
 [build-system]
 requires = ["uv_build>=0.8,<0.12"]

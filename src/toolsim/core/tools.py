@@ -129,20 +129,37 @@ def validate_args(t: Tool, args: dict[str, Any]) -> dict[str, Any]:
 
 
 def _coerce(name: str, v: Any, s: dict[str, Any]) -> Any:
+    """Validate (and lightly coerce, as MCP servers' zod schemas do) one value against its schema."""
     if v is None:
         return None
+    if "anyOf" in s:
+        for option in s["anyOf"]:
+            try:
+                return _coerce(name, v, option)
+            except ToolError:
+                continue
+        raise ToolError({"error": f"Invalid value for {name}: expected {' or '.join(o.get('type', '?') for o in s['anyOf'])}"})
     typ = s.get("type")
     try:
         if typ == "integer" and not isinstance(v, bool):
+            if isinstance(v, float) and not v.is_integer():
+                raise ValueError
             v = int(v)
-        elif typ == "number":
+        elif typ == "number" and not isinstance(v, bool):
             v = float(v)
         elif typ == "boolean" and isinstance(v, str):
+            if v.lower() not in ("true", "false", "1", "0", "yes", "no"):
+                raise ValueError
             v = v.lower() in ("true", "1", "yes")
         elif typ == "array" and isinstance(v, str):
             v = [v]
     except (TypeError, ValueError):
         raise ToolError({"error": f"Invalid value for {name}: expected {typ}"}) from None
+    expected = {"string": str, "integer": int, "number": (int, float), "boolean": bool, "array": list, "object": dict}.get(typ)
+    if expected and (not isinstance(v, expected) or (typ in ("integer", "number") and isinstance(v, bool))):
+        raise ToolError({"error": f"Invalid value for {name}: expected {typ}, got {type(v).__name__}"})
+    if typ == "array" and s.get("items"):
+        v = [_coerce(f"{name}[{i}]", x, s["items"]) for i, x in enumerate(v)]
     if "enum" in s and v not in s["enum"]:
         raise ToolError({"error": f"Invalid value for {name}: must be one of {s['enum']}"})
     return v

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import urllib.request
 from pathlib import Path
@@ -105,12 +106,23 @@ def cmd_stdio(args: argparse.Namespace) -> None:
 
 
 def cmd_serve(args: argparse.Namespace) -> None:
+    import logging
+    import os
+
     import uvicorn
 
     from .env import Environment
-    from .host import Host, create_app
+    from .host import Host, HostConfig, create_app
 
-    host = Host()
+    token = args.token or os.environ.get("TOOLSIM_TOKEN")
+    if args.host not in ("127.0.0.1", "localhost", "::1") and not token and not args.no_auth:
+        raise SystemExit(f"refusing to listen on {args.host} without a token: pass --token (or TOOLSIM_TOKEN), "
+                         "or --no-auth if the network is trusted")
+    logging.basicConfig(level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    config = HostConfig(token=token, allowed_origins=args.allow_origin or [],
+                        env_dirs=[Path(d) for d in (args.env_dir or [])], max_instances=args.max_instances,
+                        max_hang_s=args.max_hang)
+    host = Host(config)
     base = f"http://{args.host}:{args.port}"
     for path in args.env or []:
         env = Environment.load(path)
@@ -120,14 +132,23 @@ def cmd_serve(args: argparse.Namespace) -> None:
             print(f"\n[{agent}] task: {cfg['task']}")
             print(json.dumps({"mcpServers": cfg["mcpServers"]}, indent=2))
         print(f"\ngrade with: toolsim grade {path} --url {base}   (snapshot/fork: {base}/docs)")
+    if token:
+        print("auth: send 'Authorization: Bearer <token>' (or ?token=) on every request", flush=True)
     print(f"toolsim host on {base}  (control API: {base}/docs)", flush=True)
-    uvicorn.run(create_app(host), host=args.host, port=args.port, log_level="warning")
+    uvicorn.run(create_app(host), host=args.host, port=args.port, log_level=args.log_level)
 
 
 def cmd_grade(args: argparse.Namespace) -> None:
     from .env import Environment
     env = Environment.load(args.env)
-    report = json.load(urllib.request.urlopen(f"{args.url}/envs/{args.run or env.name}/grade"))
+    if not args.url.startswith(("http://", "https://")):
+        raise SystemExit("--url must be an http(s) URL")
+    import os
+    req = urllib.request.Request(f"{args.url.rstrip('/')}/envs/{args.run or env.name}/grade")  # noqa: S310 (http(s) checked)
+    token = args.token or os.environ.get("TOOLSIM_TOKEN")
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    report = json.load(urllib.request.urlopen(req, timeout=30))  # noqa: S310 (scheme checked above)
     if args.json:
         print(json.dumps(report, indent=2))
     else:
@@ -148,6 +169,13 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--host", default="127.0.0.1")
     s.add_argument("--port", type=int, default=8765)
     s.add_argument("--env", action="append", help="environment file to instantiate (repeatable)")
+    s.add_argument("--env-dir", action="append", help="directory POST /envs may load environment files from")
+    s.add_argument("--token", help="require this bearer token on every request (or set TOOLSIM_TOKEN)")
+    s.add_argument("--no-auth", action="store_true", help="allow a non-localhost bind without a token")
+    s.add_argument("--allow-origin", action="append", help="browser origin allowed besides localhost (repeatable)")
+    s.add_argument("--max-instances", type=int, default=2000)
+    s.add_argument("--max-hang", type=float, default=120.0, help="cap on real-time fault delays (seconds)")
+    s.add_argument("--log-level", default="info", choices=["debug", "info", "warning", "error"])
     s.set_defaults(fn=cmd_serve)
 
     s = sub.add_parser("stdio", help="serve one instance over stdio")
@@ -190,11 +218,20 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("env")
     s.add_argument("--url", default="http://127.0.0.1:8765")
     s.add_argument("--run", help="environment run id (default: the environment name)")
+    s.add_argument("--token", help="bearer token for the host (or TOOLSIM_TOKEN)")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_grade)
 
     args = p.parse_args(argv)
-    args.fn(args)
+    try:
+        args.fn(args)
+    except KeyboardInterrupt:
+        sys.exit(130)
+    except (ValueError, OSError) as e:  # user-facing problems: a clear message, not a traceback
+        if os.environ.get("TOOLSIM_DEBUG"):
+            raise
+        print(f"toolsim: error: {e}", file=sys.stderr)
+        sys.exit(2)
 
 
 if __name__ == "__main__":

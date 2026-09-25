@@ -13,6 +13,8 @@ from __future__ import annotations
 
 import contextlib
 import copy
+import logging
+import pickle
 import datetime as dt
 import json
 import random
@@ -25,6 +27,8 @@ from typing import Any, ClassVar, Iterator
 
 from .faults import Fault, TransportFault, parse_faults
 from .tools import Action, Tool, ToolError, validate_args
+
+log = logging.getLogger("toolsim")
 
 DEFAULT_NOW = "2026-09-21T16:00:00+00:00"  # Monday 09:00 in San Francisco
 _REASONS = {404: "Not Found", 429: "Too Many Requests", 500: "Internal Server Error", 502: "Bad Gateway",
@@ -111,6 +115,14 @@ class Service:
         return value if isinstance(value, str) else json.dumps(value, indent=2, default=str)
 
 
+def _clone(value: Any) -> Any:
+    """A deep copy of JSON-like state, ~3x faster than copy.deepcopy (rollback runs on every write)."""
+    try:
+        return pickle.loads(pickle.dumps(value, pickle.HIGHEST_PROTOCOL))  # noqa: S301 (our own bytes, never external)
+    except Exception:
+        return copy.deepcopy(value)
+
+
 class Clock:
     """Virtual time plus a global call counter. Instances in one environment share a clock, so
     timestamps line up across services and calls from every agent form one ordered timeline."""
@@ -169,7 +181,12 @@ class Instance:
             self.calls: list[dict[str, Any]] = []
             self.events: list[dict[str, Any]] = []  # world events applied to this instance
             self.faults = parse_faults(self.fault_specs)
-            self.state = self.service.initial_state(copy.deepcopy(self.seed), self)
+            try:
+                self.state = self.service.initial_state(copy.deepcopy(self.seed), self)
+            except ToolError as e:
+                raise ValueError(f"invalid seed for {self.service.name}: {self.service.render(e.payload)}") from None
+            except (KeyError, TypeError, AttributeError, IndexError, ValueError) as e:
+                raise ValueError(f"invalid seed for {self.service.name}: {type(e).__name__}: {e}") from None
 
     def snapshot(self) -> dict[str, Any]:
         """Everything needed to resume from this exact point (fork a run here)."""
@@ -315,7 +332,7 @@ class Instance:
                     payload = self._fault_payload(fault)
                     return self._finish(record, CallResult(self.service.render(payload), True, payload))
 
-            before = None if t.read_only else copy.deepcopy(self.state)
+            before = None if t.read_only else _clone(self.state)
             try:
                 value = t.fn(self, **validate_args(t, args))
                 if fault is not None and fault.kind == "duplicate_commit" and not t.read_only:
@@ -329,6 +346,13 @@ class Instance:
                 if before is not None:
                     self.state = before  # failed calls leave no partial writes
                 result = CallResult(self.service.render(e.payload), True, e.payload)
+            except Exception as e:  # a bug or an input shape the fake didn't anticipate: fail like a real 500
+                if before is not None:
+                    self.state = before
+                log.exception("tool %s.%s failed on args %r", self.service.name, name, args)
+                payload = self.service.error_shape(500, f"Internal error while handling {name}: {type(e).__name__}")
+                record["internal_error"] = f"{type(e).__name__}: {e}"
+                result = CallResult(self.service.render(payload), True, payload)
 
             if fault is not None and fault.kind == "timeout_after_commit":
                 payload = self._fault_payload(fault)
