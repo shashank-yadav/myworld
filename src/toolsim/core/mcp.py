@@ -33,7 +33,8 @@ def handle(instance: Instance, msg: Any) -> Any:
             return _ok(mid, {
                 "protocolVersion": requested if requested in SUPPORTED_VERSIONS else SUPPORTED_VERSIONS[0],
                 "capabilities": {"tools": {"listChanged": False}},
-                "serverInfo": {"name": instance.service.name, "title": instance.service.title, "version": "0.1.0"},
+                "serverInfo": {"name": instance.service.name, "title": instance.service.title,
+                               "version": instance.version},
                 "instructions": instance.service.description,
             })
         if method == "ping":

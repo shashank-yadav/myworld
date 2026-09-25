@@ -1,0 +1,403 @@
+{
+ "behavior_sha256": "12d6b5cdca56bb9472b18de174357e207c40f78381605129002e0f30d3a4e0f1",
+ "changelog": "Initial release: 12 core tools modeled on Notion's hosted MCP server.",
+ "probe_calls": 14,
+ "service": "notion",
+ "tools": [
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Search the Notion workspace for pages and databases (or users)",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "filters": {
+      "description": "Optional filters, e.g. {\"created_by_user_ids\": [...], \"created_date_range\": {...}}",
+      "type": "object"
+     },
+     "limit": {
+      "default": 10,
+      "description": "Maximum results (default 10)",
+      "type": "integer"
+     },
+     "location": {
+      "description": "Restrict results to a page (URL or ID) and its children",
+      "type": "string"
+     },
+     "query": {
+      "description": "Semantic search query over your workspace",
+      "type": "string"
+     },
+     "query_type": {
+      "default": "internal",
+      "description": "'internal' searches pages and databases; 'user' searches people",
+      "enum": [
+       "internal",
+       "user"
+      ],
+      "type": "string"
+     },
+     "sort": {
+      "description": "Sort order, e.g. 'last_edited'",
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ],
+    "type": "object"
+   },
+   "name": "notion-search"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Retrieve the content of a Notion page or database by its URL or ID",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "description": "A Notion page or database URL or ID, or a data source URL (collection://...)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "type": "object"
+   },
+   "name": "notion-fetch"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Create one or more Notion pages, optionally as rows in a database",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "allow_async": {
+      "default": false,
+      "description": "Allow the operation to run asynchronously",
+      "type": "boolean"
+     },
+     "pages": {
+      "description": "Pages to create: [{\"properties\": {\"title\": \"...\"} (or database properties), \"content\": \"Notion-flavored Markdown\"}]",
+      "items": {
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "parent": {
+      "description": "Where to create them: {\"page_id\": ...} or {\"data_source_id\": ...}. Omit for a private workspace page",
+      "type": "object"
+     }
+    },
+    "required": [
+     "pages"
+    ],
+    "type": "object"
+   },
+   "name": "notion-create-pages"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Update a Notion page's properties or content",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "allow_async": {
+      "default": false,
+      "description": "Allow the operation to run asynchronously",
+      "type": "boolean"
+     },
+     "command": {
+      "description": "What to change",
+      "enum": [
+       "update_properties",
+       "replace_content",
+       "replace_content_range",
+       "insert_content_after"
+      ],
+      "type": "string"
+     },
+     "new_str": {
+      "description": "For content commands: the new Notion-flavored Markdown",
+      "type": "string"
+     },
+     "page_id": {
+      "description": "The page to update (ID or URL)",
+      "type": "string"
+     },
+     "properties": {
+      "description": "For update_properties: property values to set (use \"title\" for a page's title)",
+      "type": "object"
+     },
+     "selection_with_ellipsis": {
+      "description": "For range commands: the start and end of the target text joined by '...', e.g. '## Risks...behind plan'",
+      "type": "string"
+     }
+    },
+    "required": [
+     "page_id",
+     "command"
+    ],
+    "type": "object"
+   },
+   "name": "notion-update-page"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Move pages to a new parent",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "page_ids": {
+      "description": "IDs or URLs of the pages to move",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "parent": {
+      "description": "Destination: {\"page_id\": ...}, {\"data_source_id\": ...} or {\"workspace\": true}",
+      "type": "object"
+     }
+    },
+    "required": [
+     "page_ids",
+     "parent"
+    ],
+    "type": "object"
+   },
+   "name": "notion-move-pages"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Duplicate a Notion page (including its content) under the same parent",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "page_url": {
+      "description": "The page to duplicate (URL or ID)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "page_url"
+    ],
+    "type": "object"
+   },
+   "name": "notion-duplicate-page"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Create a new Notion database with a schema",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "parent": {
+      "description": "Parent page: {\"page_id\": ...}",
+      "type": "object"
+     },
+     "properties": {
+      "description": "Schema: {\"Name\": \"title\", \"Status\": {\"status\": [\"Todo\", \"Done\"]}, \"Due\": \"date\", ...}",
+      "type": "object"
+     },
+     "title": {
+      "description": "Database title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "title",
+     "properties"
+    ],
+    "type": "object"
+   },
+   "name": "notion-create-database"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Query rows of a Notion database (data source)",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "data_source_url": {
+      "description": "The data source to query (collection://... or ID)",
+      "type": "string"
+     },
+     "filter": {
+      "description": "Property equality filters, e.g. {\"Status\": \"In progress\", \"Tags\": \"billing\"}",
+      "type": "object"
+     },
+     "limit": {
+      "default": 25,
+      "description": "Maximum rows (default 25)",
+      "type": "integer"
+     },
+     "mode": {
+      "default": "rows",
+      "description": "Query mode (this simulator supports 'rows')",
+      "enum": [
+       "rows",
+       "sql",
+       "view"
+      ],
+      "type": "string"
+     },
+     "query": {
+      "description": "SQL query (mode 'sql')",
+      "type": "string"
+     },
+     "sort": {
+      "description": "Sort: {\"property\": \"Due\", \"direction\": \"ascending\"}",
+      "type": "object"
+     }
+    },
+    "required": [
+     "data_source_url"
+    ],
+    "type": "object"
+   },
+   "name": "notion-query-data-sources"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Add a comment to a Notion page",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "block_id": {
+      "description": "Comment on a specific block instead of the whole page",
+      "type": "string"
+     },
+     "content": {
+      "description": "Comment text (Markdown)",
+      "type": "string"
+     },
+     "page_id": {
+      "description": "The page to comment on",
+      "type": "string"
+     }
+    },
+    "required": [
+     "page_id",
+     "content"
+    ],
+    "type": "object"
+   },
+   "name": "notion-create-comment"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Get all comments and discussions on a Notion page",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "page_id": {
+      "description": "The page whose comments to fetch",
+      "type": "string"
+     }
+    },
+    "required": [
+     "page_id"
+    ],
+    "type": "object"
+   },
+   "name": "notion-get-comments"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "List users in the Notion workspace",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "limit": {
+      "default": 100,
+      "description": "Maximum results",
+      "type": "integer"
+     },
+     "query": {
+      "description": "Filter by name or email",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "name": "notion-get-users"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "List teamspaces in the Notion workspace",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "query": {
+      "description": "Filter teamspaces by name",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "name": "notion-get-teams"
+  }
+ ],
+ "version": "2026-09-25"
+}

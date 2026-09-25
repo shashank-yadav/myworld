@@ -5,7 +5,7 @@
       John asked for 30 minutes next week about the Q4 plan. Find a time you're both free,
       put it on the calendar with him, and email him the time.
     servers:
-      gmail: {}                                  # default world
+      gmail: {version: 2026-09-25}               # pin a tool version (default: latest)
       calendar: {seed_file: seeds/calendar.yaml} # or an inline `seed:`
     faults:
       - {server: gmail, tool: send_email, kind: timeout_after_commit, on_call: 1}
@@ -68,6 +68,7 @@ class Environment:
             service = (cfg or {}).get("service", name)
             if service not in SERVICES:
                 raise ValueError(f"environment {spec.get('name')!r}: unknown service {service!r}")
+            SERVICES[service]().resolve_version((cfg or {}).get("version"))  # fail fast on unknown versions
         for f in spec.get("faults") or []:
             if f.get("server") not in servers:
                 raise ValueError(f"fault targets unknown server {f.get('server')!r}")
@@ -91,6 +92,10 @@ class Environment:
     def service_for(self, server: str) -> str:
         return self.servers[server].get("service", server)
 
+    def version_for(self, server: str) -> str | None:
+        v = self.servers[server].get("version")
+        return str(v) if v is not None else None
+
     def faults_for(self, server: str) -> list[dict[str, Any]]:
         return [{k: v for k, v in f.items() if k != "server"} for f in self.faults if f["server"] == server]
 
@@ -98,7 +103,8 @@ class Environment:
         """One fresh, isolated instance per server (in-process)."""
         from .services import get_service
         return {s: Instance(get_service(self.service_for(s)), self.seed_for(s), rng_seed=self.rng_seed,
-                            faults=self.faults_for(s), instance_id=f"{prefix or self.name}-{s}")
+                            faults=self.faults_for(s), instance_id=f"{prefix or self.name}-{s}",
+                            version=self.version_for(s))
                 for s in self.servers}
 
     def grade(self, worlds: dict[str, dict[str, Any]]) -> dict[str, Any]:

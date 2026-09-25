@@ -61,6 +61,32 @@ class GitHub(Service):
     title = "GitHub"
     description = "Simulated GitHub. Behaves like the GitHub MCP server; nothing is really pushed."
 
+    versions = {"2026-09-25": "Initial release: 26 tools modeled on the reference GitHub MCP server."}
+
+    def probe(self, ctx: Instance) -> None:
+        c = ctx.call
+        o = {"owner": "acme", "repo": "api"}
+        c("list_issues", o)
+        c("search_issues", {"q": "repo:acme/api is:open label:bug"})
+        f = c("get_file_contents", {**o, "path": "README.md"})
+        c("create_or_update_file", {**o, "path": "README.md", "content": "x", "message": "m", "branch": "main"})
+        c("create_or_update_file", {**o, "path": "README.md", "content": "# Acme\n", "message": "Update README",
+                                    "branch": "main", "sha": f.data["sha"]})
+        c("create_branch", {**o, "branch": "docs"})
+        c("push_files", {**o, "branch": "docs", "files": [{"path": "docs/a.md", "content": "hi"}], "message": "docs"})
+        c("create_pull_request", {**o, "title": "Docs", "head": "docs", "base": "main"})
+        c("create_pull_request", {**o, "title": "dup", "head": "fix/flaky-retry", "base": "main"})
+        c("get_pull_request", {**o, "pull_number": 4})
+        c("get_pull_request_files", {**o, "pull_number": 4})
+        c("get_pull_request_status", {**o, "pull_number": 4})
+        c("create_pull_request_review", {**o, "pull_number": 4, "body": "LGTM", "event": "APPROVE"})
+        c("merge_pull_request", {**o, "pull_number": 4, "merge_method": "squash"})
+        c("merge_pull_request", {**o, "pull_number": 4})
+        c("list_commits", {**o, "per_page": "5"})
+        c("search_code", {"q": "backoff repo:acme/api"})
+        c("add_issue_comment", {**o, "issue_number": 1, "body": "Fixed by #4"})
+        c("update_issue", {**o, "issue_number": 1, "state": "closed"})
+
     def default_seed(self) -> dict[str, Any]:
         retry_v1 = ("import random, time\n\n\ndef backoff(attempt: int) -> float:\n"
                     "    jitter = random.random()\n    return min(30, 2 ** attempt) + jitter\n")

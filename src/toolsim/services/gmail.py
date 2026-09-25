@@ -55,6 +55,26 @@ class Gmail(Service):
     title = "Gmail"
     description = "Simulated Gmail mailbox. Behaves like the Gmail MCP server; nothing is really sent."
 
+    versions = {"2026-09-25": "Initial release: 19 tools modeled on GongRzhe/Gmail-MCP-Server."}
+
+    def probe(self, ctx: Instance) -> None:
+        c = ctx.call
+        ids = list(ctx.state["messages"])
+        c("search_emails", {"query": "is:unread"})
+        c("search_emails", {"query": "from:john OR has:attachment newer_than:7d"})
+        c("read_email", {"messageId": ids[0]})
+        c("read_email", {"messageId": "missing"})
+        c("send_email", {"to": ["john@acme.com"], "subject": "Re: Q4 planning", "body": "Tue 10am?"})
+        c("draft_email", {"to": ["priya@acme.com"], "subject": "Draft", "body": "WIP"})
+        c("modify_email", {"messageId": ids[0], "removeLabelIds": ["UNREAD"], "addLabelIds": ["STARRED"]})
+        c("list_email_labels", {})
+        c("create_label", {"name": "Travel"})
+        c("get_or_create_label", {"name": "clients"})
+        c("create_filter_from_template", {"template": "fromSender", "parameters": {"senderEmail": "x@y.com", "archive": True}})
+        c("list_filters", {})
+        c("delete_email", {"messageId": ids[-1]})
+        c("search_emails", {"query": "in:sent"})
+
     def default_seed(self) -> dict[str, Any]:
         return {
             "user": {"email": "alex@acme.com", "name": "Alex Rivera"},

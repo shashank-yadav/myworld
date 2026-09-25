@@ -5,7 +5,7 @@ Agent-facing (per instance):
 
 Control plane (for test harnesses, RL loops and graders; agents never see it):
     GET    /services                      available services and their tools
-    POST   /instances                     {service, seed?, rng_seed?, faults?, id?} -> {id, mcp_url}
+    POST   /instances                     {service, version?, seed?, rng_seed?, faults?, id?} -> {id, mcp_url}
     GET    /instances                     list
     DELETE /instances/{id}
     GET    /instances/{id}/state          full internal state (for graders)
@@ -38,9 +38,10 @@ class Host:
         self._lock = threading.Lock()
 
     def create(self, service: str, seed: dict[str, Any] | None = None, *, rng_seed: int = 0,
-               faults: list[dict[str, Any]] | None = None, instance_id: str | None = None) -> Instance:
+               faults: list[dict[str, Any]] | None = None, instance_id: str | None = None,
+               version: str | None = None) -> Instance:
         inst = Instance(get_service(service), seed, rng_seed=rng_seed, faults=faults,
-                        instance_id=instance_id or f"{service}-{uuid.uuid4().hex[:8]}")
+                        instance_id=instance_id or f"{service}-{uuid.uuid4().hex[:8]}", version=version)
         with self._lock:
             if inst.id in self.instances:
                 raise ValueError(f"instance {inst.id} already exists")
@@ -104,14 +105,15 @@ def create_app(host: Host | None = None) -> FastAPI:
         out = {}
         for name, cls in SERVICES.items():
             s = cls()
-            out[name] = {"title": s.title, "tools": [t.name for t in s.tools]}
+            out[name] = {"title": s.title, "latest": s.latest_version(), "versions": s.versions,
+                         "tools": [t.name for t in s.tools if t.in_version(s.latest_version())]}
         return out
 
     @app.post("/instances")
     def create(request: Request, spec: dict[str, Any] = Body(...)) -> dict[str, Any]:
         try:
             i = host.create(spec["service"], spec.get("seed"), rng_seed=spec.get("rng_seed", 0),
-                            faults=spec.get("faults"), instance_id=spec.get("id"))
+                            faults=spec.get("faults"), instance_id=spec.get("id"), version=spec.get("version"))
         except (KeyError, ValueError) as e:
             raise HTTPException(400, str(e)) from None
         return _describe(request, i)
@@ -161,7 +163,8 @@ def create_app(host: Host | None = None) -> FastAPI:
     @app.post("/instances/{instance_id}/fork")
     def fork(instance_id: str, request: Request) -> dict[str, Any]:
         src = inst(instance_id)
-        clone = host.create(src.service.name, src.seed, rng_seed=src.rng_seed, faults=src.fault_specs)
+        clone = host.create(src.service.name, src.seed, rng_seed=src.rng_seed, faults=src.fault_specs,
+                            version=src.version)
         clone.restore(src.snapshot())
         return _describe(request, clone)
 
@@ -178,5 +181,5 @@ def create_app(host: Host | None = None) -> FastAPI:
 
 def _describe(request: Request, i: Instance) -> dict[str, Any]:
     base = str(request.base_url).rstrip("/")
-    return {"id": i.id, "service": i.service.name, "mcp_url": f"{base}/instances/{i.id}/mcp",
+    return {"id": i.id, "service": i.service.name, "version": i.version, "mcp_url": f"{base}/instances/{i.id}/mcp",
             "calls": len(i.calls), "now": i.now().isoformat()}

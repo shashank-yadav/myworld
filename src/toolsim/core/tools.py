@@ -37,6 +37,11 @@ class Tool:
     destructive: bool = False
     idempotent: bool = False
     params: dict[str, inspect.Parameter] = field(default_factory=dict)
+    since: str | None = None   # first service version (date) that has this tool
+    until: str | None = None   # first service version that no longer has it
+
+    def in_version(self, version: str) -> bool:
+        return (self.since is None or version >= self.since) and (self.until is None or version < self.until)
 
     def mcp_definition(self) -> dict[str, Any]:
         return {
@@ -53,7 +58,8 @@ class Tool:
 
 
 def tool(name: str | None = None, *, read_only: bool = False, destructive: bool = False,
-         idempotent: bool = False, description: str | None = None) -> Callable[[Callable[..., Any]], Tool]:
+         idempotent: bool = False, description: str | None = None, since: str | None = None,
+         until: str | None = None) -> Callable[[Callable[..., Any]], Tool]:
     def wrap(fn: Callable[..., Any]) -> Tool:
         sig = inspect.signature(fn)
         hints = get_type_hints(fn, include_extras=True)
@@ -72,7 +78,7 @@ def tool(name: str | None = None, *, read_only: bool = False, destructive: bool 
             name=name or fn.__name__, fn=fn,
             description=description or inspect.cleandoc(fn.__doc__ or ""),
             input_schema=schema, read_only=read_only, destructive=destructive,
-            idempotent=idempotent or read_only, params=params,
+            idempotent=idempotent or read_only, params=params, since=since, until=until,
         )
     return wrap
 

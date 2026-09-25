@@ -39,6 +39,27 @@ class Calendar(Service):
     title = "Google Calendar"
     description = "Simulated Google Calendar. Behaves like the Google Calendar MCP server; nothing is really scheduled."
 
+    versions = {"2026-09-25": "Initial release: 11 tools modeled on nspady/google-calendar-mcp."}
+
+    def probe(self, ctx: Instance) -> None:
+        c = ctx.call
+        c("list-calendars", {})
+        c("list-events", {"timeMin": "2026-09-21T00:00:00", "timeMax": "2026-09-28T00:00:00"})
+        c("get-freebusy", {"calendars": [{"id": "primary"}, {"id": "john@acme.com"}],
+                           "timeMin": "2026-09-22T08:00:00", "timeMax": "2026-09-23T18:00:00"})
+        r = c("create-event", {"summary": "Q4 plan", "start": "2026-09-22T10:00:00", "end": "2026-09-22T10:30:00",
+                               "attendees": [{"email": "john@acme.com"}]})
+        eid = r.data["event"]["id"]
+        c("update-event", {"eventId": eid, "location": "Room 2"})
+        c("search-events", {"query": "q4"})
+        c("create-event", {"summary": "x", "calendarId": "team@acme.com", "start": "2026-09-22T10:00:00",
+                           "end": "2026-09-22T11:00:00"})
+        c("list-events", {"calendarId": "john@acme.com"})
+        c("delete-event", {"eventId": eid})
+        c("delete-event", {"eventId": eid})
+        c("get-current-time", {})
+        c("list-colors", {})
+
     def default_seed(self) -> dict[str, Any]:
         return {
             "user": {"email": "alex@acme.com", "name": "Alex Rivera"},

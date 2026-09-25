@@ -4,6 +4,8 @@
     toolsim serve [--env ENV.yaml ...]        run the host; with --env, create that environment's servers
     toolsim stdio gmail [--seed s.yaml]       one instance over stdio, for agents configured with a command
     toolsim grade ENV.yaml --url URL          grade a finished run against the environment's checks
+    toolsim versions                          service versions and whether each still matches its freeze
+    toolsim freeze [SERVICE ...]              freeze newly added versions
 """
 
 from __future__ import annotations
@@ -26,14 +28,40 @@ def cmd_services(args: argparse.Namespace) -> None:
     from .services import SERVICES
     for name, cls in SERVICES.items():
         s = cls()
-        print(f"{name:10} {s.title:16} {len(s.tools):2} tools: {', '.join(t.name for t in s.tools)}")
+        tools = [t.name for t in s.tools if t.in_version(s.latest_version())]
+        print(f"{name:10} {s.title:16} @{s.latest_version()}  {len(tools):2} tools: {', '.join(tools)}")
+
+
+def cmd_versions(args: argparse.Namespace) -> None:
+    from .services import SERVICES
+    from .versions import check
+    for name, cls in SERVICES.items():
+        for v, note in cls.versions.items():
+            problems = check(name, v)
+            mark = "✓" if not problems else "✗"
+            latest = "  (latest)" if v == cls.latest_version() else ""
+            print(f"{mark} {name}@{v}{latest}  {note}")
+            for pr in problems:
+                print(f"    {pr}")
+
+
+def cmd_freeze(args: argparse.Namespace) -> None:
+    from .versions import check_all, freeze
+    written = freeze(args.service or None)
+    print("\n".join(f"froze {w}" for w in written) or "nothing new to freeze")
+    problems = check_all()
+    if problems:
+        print("\nReleased versions no longer match the code. Ship the change as a new dated version:")
+        print("\n".join(f"  {p}" for p in problems))
+        sys.exit(1)
 
 
 def cmd_stdio(args: argparse.Namespace) -> None:
     from .core.instance import Instance
     from .core.mcp import serve_stdio
     from .services import get_service
-    inst = Instance(get_service(args.service), _load(args.seed), rng_seed=args.rng_seed, faults=_load(args.faults))
+    inst = Instance(get_service(args.service), _load(args.seed), rng_seed=args.rng_seed, faults=_load(args.faults),
+                    version=args.tool_version)
     serve_stdio(inst)
 
 
@@ -50,7 +78,8 @@ def cmd_serve(args: argparse.Namespace) -> None:
         config: dict[str, Any] = {"mcpServers": {}}
         for server in env.servers:
             inst = host.create(env.service_for(server), env.seed_for(server), rng_seed=env.rng_seed,
-                               faults=env.faults_for(server), instance_id=f"{env.name}-{server}")
+                               faults=env.faults_for(server), instance_id=f"{env.name}-{server}",
+                               version=env.version_for(server))
             config["mcpServers"][server] = {"url": f"{base}/instances/{inst.id}/mcp"}
         print(f"environment {env.name}: {', '.join(env.servers)}")
         print(f"task: {env.task.strip()}")
@@ -96,7 +125,15 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--seed", help="seed file (YAML/JSON)")
     s.add_argument("--faults", help="faults file (YAML/JSON list)")
     s.add_argument("--rng-seed", type=int, default=0)
+    s.add_argument("--version", dest="tool_version", help="service version date (default: latest)")
     s.set_defaults(fn=cmd_stdio)
+
+    s = sub.add_parser("versions", help="list service versions and whether each still matches its frozen fingerprint")
+    s.set_defaults(fn=cmd_versions)
+
+    s = sub.add_parser("freeze", help="freeze new service versions (never overwrites released ones)")
+    s.add_argument("service", nargs="*")
+    s.set_defaults(fn=cmd_freeze)
 
     s = sub.add_parser("grade", help="grade a run against an environment's checks")
     s.add_argument("env")

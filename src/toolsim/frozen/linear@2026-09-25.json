@@ -1,0 +1,797 @@
+{
+ "behavior_sha256": "54058807c3d0e70cadb56d2501fdbb61dbdd7a12bda785969443072f49b66e55",
+ "changelog": "Initial release: 23 tools modeled on Linear's hosted MCP server.",
+ "probe_calls": 16,
+ "service": "linear",
+ "tools": [
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "List comments for a specific Linear issue",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "issueId": {
+      "description": "Issue ID or identifier",
+      "type": "string"
+     }
+    },
+    "required": [
+     "issueId"
+    ],
+    "type": "object"
+   },
+   "name": "list_comments"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Create a comment on a specific Linear issue",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "body": {
+      "description": "Content as Markdown",
+      "type": "string"
+     },
+     "issueId": {
+      "description": "Issue ID or identifier",
+      "type": "string"
+     },
+     "parentId": {
+      "description": "A parent comment ID to reply to",
+      "type": "string"
+     }
+    },
+    "required": [
+     "issueId",
+     "body"
+    ],
+    "type": "object"
+   },
+   "name": "create_comment"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Retrieve cycles for a specific Linear team",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "teamId": {
+      "description": "Team name, key or ID",
+      "type": "string"
+     },
+     "type": {
+      "description": "Which cycle(s) to return",
+      "enum": [
+       "current",
+       "previous",
+       "next"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "teamId"
+    ],
+    "type": "object"
+   },
+   "name": "list_cycles"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Retrieve a Linear document by ID or slug",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "description": "Document ID or slug",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "type": "object"
+   },
+   "name": "get_document"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "List documents in the user's Linear workspace",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "limit": {
+      "default": 50,
+      "description": "Max results (default 50)",
+      "type": "integer"
+     },
+     "projectId": {
+      "description": "Filter by project ID or name",
+      "type": "string"
+     },
+     "query": {
+      "description": "Search query",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "name": "list_documents"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Retrieve detailed information about an issue by ID, including attachments and git branch name",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "description": "Issue ID or identifier (e.g. ENG-123)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "type": "object"
+   },
+   "name": "get_issue"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "List issues in the user's Linear workspace",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "assignee": {
+      "description": "User ID, name, email, or 'me'",
+      "type": "string"
+     },
+     "cycle": {
+      "description": "Cycle ID",
+      "type": "string"
+     },
+     "includeArchived": {
+      "default": false,
+      "description": "Include archived issues",
+      "type": "boolean"
+     },
+     "label": {
+      "description": "Label name or ID",
+      "type": "string"
+     },
+     "limit": {
+      "default": 50,
+      "description": "Max results (default 50, max 250)",
+      "type": "integer"
+     },
+     "orderBy": {
+      "default": "updatedAt",
+      "description": "Sort order",
+      "enum": [
+       "createdAt",
+       "updatedAt"
+      ],
+      "type": "string"
+     },
+     "parentId": {
+      "description": "Parent issue ID or identifier",
+      "type": "string"
+     },
+     "project": {
+      "description": "Project name or ID",
+      "type": "string"
+     },
+     "query": {
+      "description": "Search issue titles and descriptions",
+      "type": "string"
+     },
+     "state": {
+      "description": "Status name or ID",
+      "type": "string"
+     },
+     "team": {
+      "description": "Team name, key or ID",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "name": "list_issues"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Create a new Linear issue",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "assignee": {
+      "description": "User ID, name, email, or 'me'",
+      "type": "string"
+     },
+     "description": {
+      "description": "Content as Markdown",
+      "type": "string"
+     },
+     "dueDate": {
+      "description": "Due date (ISO format)",
+      "type": "string"
+     },
+     "estimate": {
+      "description": "Issue estimate value",
+      "type": "integer"
+     },
+     "labels": {
+      "description": "Label names or IDs",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "parentId": {
+      "description": "Parent issue ID or identifier",
+      "type": "string"
+     },
+     "priority": {
+      "description": "0 = No priority, 1 = Urgent, 2 = High, 3 = Normal, 4 = Low",
+      "type": "integer"
+     },
+     "project": {
+      "description": "Project name or ID",
+      "type": "string"
+     },
+     "state": {
+      "description": "State type, name, or ID",
+      "type": "string"
+     },
+     "team": {
+      "description": "Team name, key or ID",
+      "type": "string"
+     },
+     "title": {
+      "description": "Issue title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "title",
+     "team"
+    ],
+    "type": "object"
+   },
+   "name": "create_issue"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Update an existing Linear issue",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "assignee": {
+      "description": "User ID, name, email, or 'me'. Empty string to unassign",
+      "type": "string"
+     },
+     "description": {
+      "description": "Content as Markdown",
+      "type": "string"
+     },
+     "dueDate": {
+      "description": "Due date (ISO format)",
+      "type": "string"
+     },
+     "estimate": {
+      "description": "Issue estimate value",
+      "type": "integer"
+     },
+     "id": {
+      "description": "Issue ID or identifier",
+      "type": "string"
+     },
+     "labels": {
+      "description": "Label names or IDs (replaces existing)",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "parentId": {
+      "description": "Parent issue ID or identifier",
+      "type": "string"
+     },
+     "priority": {
+      "description": "0 = No priority, 1 = Urgent, 2 = High, 3 = Normal, 4 = Low",
+      "type": "integer"
+     },
+     "project": {
+      "description": "Project name or ID",
+      "type": "string"
+     },
+     "state": {
+      "description": "State type, name, or ID",
+      "type": "string"
+     },
+     "title": {
+      "description": "New title",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "type": "object"
+   },
+   "name": "update_issue"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "List available issue statuses in a Linear team",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "team": {
+      "description": "Team name, key or ID",
+      "type": "string"
+     }
+    },
+    "required": [
+     "team"
+    ],
+    "type": "object"
+   },
+   "name": "list_issue_statuses"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Retrieve detailed information about an issue status in Linear by name or ID",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "id": {
+      "description": "Status ID or name",
+      "type": "string"
+     },
+     "team": {
+      "description": "Team name, key or ID",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id",
+     "team"
+    ],
+    "type": "object"
+   },
+   "name": "get_issue_status"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "List available issue labels in a Linear workspace or team",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "name": {
+      "description": "Filter by label name",
+      "type": "string"
+     },
+     "team": {
+      "description": "Team name, key or ID",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "name": "list_issue_labels"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Create a new Linear issue label",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "color": {
+      "description": "Hex color code",
+      "type": "string"
+     },
+     "description": {
+      "description": "Label description",
+      "type": "string"
+     },
+     "name": {
+      "description": "Label name",
+      "type": "string"
+     },
+     "teamId": {
+      "description": "Team name, key or ID (omit for a workspace label)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name"
+    ],
+    "type": "object"
+   },
+   "name": "create_issue_label"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "List projects in the user's Linear workspace",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "includeArchived": {
+      "default": false,
+      "description": "Include archived projects",
+      "type": "boolean"
+     },
+     "limit": {
+      "default": 50,
+      "description": "Max results (default 50)",
+      "type": "integer"
+     },
+     "member": {
+      "description": "User ID, name, email, or 'me'",
+      "type": "string"
+     },
+     "query": {
+      "description": "Search for project name",
+      "type": "string"
+     },
+     "state": {
+      "description": "State name or ID",
+      "type": "string"
+     },
+     "team": {
+      "description": "Team name, key or ID",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "name": "list_projects"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Retrieve details of a specific project in Linear",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "query": {
+      "description": "Project ID or name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ],
+    "type": "object"
+   },
+   "name": "get_project"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Create a new project in Linear",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "description": {
+      "description": "Content as Markdown",
+      "type": "string"
+     },
+     "labels": {
+      "description": "Project label names",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "lead": {
+      "description": "User ID, name, email, or 'me'",
+      "type": "string"
+     },
+     "name": {
+      "description": "Project name",
+      "type": "string"
+     },
+     "startDate": {
+      "description": "Start date (ISO format)",
+      "type": "string"
+     },
+     "state": {
+      "description": "Project state: backlog, planned, started, paused, completed, canceled",
+      "type": "string"
+     },
+     "summary": {
+      "description": "A concise plaintext summary (max 255 chars)",
+      "type": "string"
+     },
+     "targetDate": {
+      "description": "Target date (ISO format)",
+      "type": "string"
+     },
+     "team": {
+      "description": "Team name, key or ID",
+      "type": "string"
+     }
+    },
+    "required": [
+     "name",
+     "team"
+    ],
+    "type": "object"
+   },
+   "name": "create_project"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Update an existing Linear project",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "description": {
+      "description": "Content as Markdown",
+      "type": "string"
+     },
+     "id": {
+      "description": "Project ID or name",
+      "type": "string"
+     },
+     "labels": {
+      "description": "Project label names",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "lead": {
+      "description": "User ID, name, email, or 'me'",
+      "type": "string"
+     },
+     "name": {
+      "description": "New name",
+      "type": "string"
+     },
+     "startDate": {
+      "description": "Start date (ISO format)",
+      "type": "string"
+     },
+     "state": {
+      "description": "Project state",
+      "type": "string"
+     },
+     "summary": {
+      "description": "New summary",
+      "type": "string"
+     },
+     "targetDate": {
+      "description": "Target date (ISO format)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "id"
+    ],
+    "type": "object"
+   },
+   "name": "update_project"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "List available project labels in the Linear workspace",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "name": {
+      "description": "Filter by label name",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "name": "list_project_labels"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "List teams in the user's Linear workspace",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "query": {
+      "description": "Search query for team name",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "name": "list_teams"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Retrieve details of a specific Linear team",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "query": {
+      "description": "Team UUID, key, or name",
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ],
+    "type": "object"
+   },
+   "name": "get_team"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Retrieve users in the Linear workspace",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "query": {
+      "description": "Filter by name or email",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "name": "list_users"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Retrieve details of a specific Linear user",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "query": {
+      "description": "User ID, name, email, or 'me'",
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ],
+    "type": "object"
+   },
+   "name": "get_user"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Search Linear's documentation to learn about features and usage",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "page": {
+      "default": 0,
+      "description": "The page number",
+      "type": "integer"
+     },
+     "query": {
+      "description": "The search query",
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ],
+    "type": "object"
+   },
+   "name": "search_documentation"
+  }
+ ],
+ "version": "2026-09-25"
+}

@@ -43,6 +43,24 @@ class Slack(Service):
     title = "Slack"
     description = "Simulated Slack workspace. Behaves like the Slack MCP server; nothing is really posted."
 
+    versions = {"2026-09-25": "Initial release: 8 tools modeled on the reference Slack MCP server."}
+
+    def probe(self, ctx: Instance) -> None:
+        c = ctx.call
+        chans = {ch["name"]: ch["id"] for ch in ctx.state["channels"].values()}
+        c("slack_list_channels", {"limit": 2})
+        c("slack_get_users", {})
+        h = c("slack_get_channel_history", {"channel_id": chans["general"]})
+        parent = next(m for m in h.data["messages"] if m.get("reply_count"))
+        c("slack_get_thread_replies", {"channel_id": chans["general"], "thread_ts": parent["ts"]})
+        c("slack_reply_to_thread", {"channel_id": chans["general"], "thread_ts": parent["ts"], "text": "On it"})
+        c("slack_add_reaction", {"channel_id": chans["general"], "timestamp": parent["ts"], "reaction": "eyes"})
+        c("slack_add_reaction", {"channel_id": chans["general"], "timestamp": parent["ts"], "reaction": "eyes"})
+        c("slack_post_message", {"channel_id": chans["api-oncall"], "text": "Rolled back"})
+        c("slack_post_message", {"channel_id": chans["random"], "text": "hi"})
+        c("slack_post_message", {"channel_id": chans["leadership"], "text": "hi"})
+        c("slack_get_user_profile", {"user_id": next(iter(ctx.state["users"]))})
+
     def default_seed(self) -> dict[str, Any]:
         return {
             "team": {"name": "Acme", "domain": "acme"},

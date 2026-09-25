@@ -72,4 +72,4 @@ def test_host_runs_isolated_instances_with_control_plane():
     assert c.put("/instances/b/faults", json=[{"kind": "nope"}]).status_code == 400
     assert c.post("/instances", json={"service": "fax"}).status_code == 400
     assert c.post("/instances/zzz/mcp", json={}).status_code == 404
-    assert set(c.get("/services").json()) == {"gmail", "calendar", "slack", "github"}
+    assert set(c.get("/services").json()) >= {"gmail", "calendar", "slack", "github", "jira"}

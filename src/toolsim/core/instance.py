@@ -35,9 +35,33 @@ class Service:
     title: ClassVar[str] = ""
     description: ClassVar[str] = ""
     tools: ClassVar[list[Tool]] = []
+    # Date-based versions, oldest first: {"2026-09-25": "what changed"}. A version is a frozen
+    # contract: tool definitions and behavior. Any change ships as a new date; old dates keep
+    # working (gate changes on ``ctx.version`` or ``@tool(since=..., until=...)``).
+    versions: ClassVar[dict[str, str]] = {}
+    # How closely the interface is known to match the real MCP server:
+    #   "documented": tool names and parameters taken from the real server's published reference
+    #   "preview":    tool names are real; some parameters or response shapes are inferred
+    fidelity: ClassVar[str] = "documented"
+
+    @classmethod
+    def latest_version(cls) -> str:
+        return max(cls.versions)
+
+    def resolve_version(self, version: str | None) -> str:
+        if version in (None, "", "latest"):
+            return self.latest_version()
+        v = str(version)
+        if v not in self.versions:
+            raise ValueError(f"{self.name} has no version {v!r}; available: {', '.join(self.versions)}")
+        return v
 
     def initial_state(self, seed: dict[str, Any], ctx: Instance) -> dict[str, Any]:
         raise NotImplementedError
+
+    def probe(self, ctx: Instance) -> None:
+        """A fixed script of representative calls on the default world. Its results are frozen per
+        version (see toolsim.versions), so any behavior change shows up as a changed fingerprint."""
 
     def default_seed(self) -> dict[str, Any]:
         """A small, realistic world used when an environment doesn't provide one."""
@@ -71,14 +95,16 @@ class CallResult:
 
 class Instance:
     def __init__(self, service: Service, seed: dict[str, Any] | None = None, *, rng_seed: int = 0,
-                 faults: list[dict[str, Any]] | None = None, instance_id: str | None = None):
+                 faults: list[dict[str, Any]] | None = None, instance_id: str | None = None,
+                 version: str | None = None):
         self.service = service
+        self.version = service.resolve_version(version)
         self.id = instance_id or f"{service.name}-{uuid.uuid4().hex[:8]}"
         self.seed = copy.deepcopy(seed) if seed is not None else service.default_seed()
         self.rng_seed = rng_seed
         self.fault_specs = faults or []
         self.lock = threading.RLock()
-        self.tools = {t.name: t for t in service.tools}
+        self.tools = {t.name: t for t in service.tools if t.in_version(self.version)}
         self.reset()
 
     # -- lifecycle ---------------------------------------------------------------------
@@ -139,7 +165,7 @@ class Instance:
     # -- the agent-facing entry point ----------------------------------------------------
 
     def list_tools(self) -> list[dict[str, Any]]:
-        return [t.mcp_definition() for t in self.service.tools]
+        return [t.mcp_definition() for t in self.tools.values()]
 
     def call(self, name: str, args: dict[str, Any] | None) -> CallResult:
         args = args or {}
