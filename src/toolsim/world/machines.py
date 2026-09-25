@@ -13,8 +13,13 @@ shell-quoted values: ``{id}`` and other handle fields, ``{snapshot}``, and mutat
     }, handle={"id": "agent-box"})
 
 ``DockerComponent`` is that, ready-made: filesystem snapshots are image layers (copy-on-write),
-so checkpointing a container per step is cheap. Process memory isn't captured (commit takes the
-disk); agents that need it can use CRIU-backed checkpoints through the same templates.
+so checkpointing a container per step is cheap.
+
+A machine is the one opaque part of a world, so it's treated as disk plus a reboot, by design:
+files survive a snapshot, running processes restart. What matters to a task belongs in semantic
+components (services, databases, directories), where it can be diffed, mutated and graded; a
+memory image can't be. Where memory-level fidelity is really needed, a VM backend (Firecracker,
+CRIU, a hosted VM service) plugs in through these same templates.
 """
 
 from __future__ import annotations

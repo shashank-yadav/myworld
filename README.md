@@ -338,7 +338,11 @@ checks:
   results diverged and whether the outcome changed. Send `variants` to try several at once.
 - **Machines:** `command` components are driven by shell templates (snapshot, restore, clone, view,
   `mutate.<op>`), so any backend with a CLI plugs in; `docker` is the ready-made preset (snapshots
-  are image layers). Both, like `remote`, are allowed only in environment files.
+  are image layers). Both, like `remote`, are allowed only in environment files. The agent's machine
+  is the one opaque part of a world, so it's treated as disk plus a reboot, by design: whatever a
+  task depends on belongs in semantic components, where it can be diffed, mutated and graded. For
+  memory-level fidelity, plug a VM backend (Firecracker, CRIU, a hosted VM service) into the same
+  templates.
 - **Durable, copy-on-write storage:** `toolsim serve --store worlds.db` keeps checkpoints in a
   content-addressed store where unchanged subtrees are shared, so a checkpoint per step is cheap.
   `/envs/{id}/save` and `/envs/load` keep runs across restarts; `/envs/{id}/export` and
@@ -417,7 +421,8 @@ Security:
   environment's directory.
 - **Limits:** instances, snapshots, fault delays and request size are capped.
 
-State lives in memory in one process: snapshots are for branching, not durability.
+Runs live in the host's memory; with `--store`, checkpoints and saved runs are durable and survive
+restarts.
 
 ## Code layout
 
