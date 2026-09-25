@@ -44,7 +44,10 @@ Checks look at the final **state** (what's true in the world), at the **calls** 
         answer: {contains: {server: github, state: "repos[acme/api].pulls", where: {number: 4}, field: merge_commit_sha}}
         weight: 2
 
-``answer`` takes ``contains`` (text, or a value looked up in the final state) or ``matches`` (a regex). ``where`` matchers: plain values match exactly (lists: "contains all"), a key
+``answer`` takes ``contains`` (text, or a value looked up in the final state) or ``matches`` (a regex),
+plus guards against answer stuffing: ``max_len`` (characters) and ``not`` (regexes that must not
+match, e.g. the distractor values). ``calls: "*"`` matches calls to any tool, so
+``{calls: "*", where: {committed: true}, count: 0}`` says "changed nothing". ``where`` matchers: plain values match exactly (lists: "contains all"), a key
 ending in ``~`` matches a case-insensitive substring, dotted keys reach into nested objects and
 lists; ``!key`` negates a matcher and ``key~re`` matches a regular expression. Bounds: ``count``,
 ``min``, ``max``.
@@ -214,7 +217,7 @@ class Environment:
                 view = SERVICES[self.service_for(c["server"])]().grading_view(world["state"])
                 items = _collection(view, c["state"])
             else:
-                items = [call for call in world["calls"] if call["tool"] == c["calls"]
+                items = [call for call in world["calls"] if c["calls"] in ("*", call["tool"])
                          and (c.get("agent") is None or call.get("agent") == c["agent"])
                          and (c.get("committed") is None or call.get("committed") == c["committed"])
                          and (c.get("ok") is None or call.get("ok") == c["ok"])]
@@ -237,6 +240,11 @@ class Environment:
     def _answer_ok(self, spec: dict[str, Any], worlds: dict[str, dict[str, Any]],
                    answer: str | None) -> tuple[bool, dict[str, Any]]:
         text = answer or ""
+        if spec.get("max_len") is not None and len(text) > int(spec["max_len"]):
+            return False, {"max_len": spec["max_len"], "got": len(text)}
+        for bad in spec.get("not") or []:
+            if re.search(str(bad), text, re.I | re.S):
+                return False, {"not": bad}
         if "matches" in spec:
             return bool(re.search(str(spec["matches"]), text, re.I | re.S)), {"matches": spec["matches"]}
         want = spec["contains"]

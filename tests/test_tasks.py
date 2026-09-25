@@ -116,3 +116,35 @@ def test_tasks_run_over_http():
     r = c.post("/envs", json={"spec": spec, "id": "t"}).json()
     assert "Send" in r["agents"]["agent"]["task"]
     assert c.post("/envs/t/submit", json={"answer": "done"}).json()["reward"] < 1
+
+
+def test_cancelling_the_whole_series_is_caught():
+    spec = first("calendar.cancel_occurrence")
+    series = spec["reference"][0]["arguments"]["eventId"].split("_")[0]
+    assert run(spec, [{"tool": "calendar__delete-event", "arguments": {"eventId": series}}])["reward"] == 0
+
+
+def test_posting_at_top_level_instead_of_the_thread_is_caught():
+    spec = first("slack.thread_reply")
+    ref = spec["reference"][0]["arguments"]
+    grade = run(spec, [{"tool": "slack__slack_post_message", "arguments": {"channel_id": ref["channel_id"],
+                                                                          "text": ref["text"]}}])
+    assert grade["reward"] == 0
+
+
+def test_copying_instead_of_moving_is_partial_and_moving_others_is_caught():
+    spec = first("drive.move_file")
+    ref = spec["reference"][0]["arguments"]
+    added_only = run(spec, [{"tool": "drive__update_drive_file", "arguments": {"file_id": ref["file_id"],
+                                                                              "add_parents": ref["add_parents"]}}])
+    assert 0 < added_only["reward"] < 1
+
+
+def test_answer_stuffing_needs_the_guards():
+    spec = first("gmail.receipt_amount")
+    assert tasks.validate(spec)["stuffing_reward"] < 1
+    unguarded = json.loads(json.dumps(spec))
+    for c in unguarded["checks"]:
+        if "answer" in c:
+            c["answer"] = {"matches": c["answer"]["matches"]}
+    assert tasks.validate(unguarded)["stuffing_reward"] == 1.0, "without max_len/not, stuffing would win"

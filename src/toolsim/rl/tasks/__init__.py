@@ -20,7 +20,9 @@ as JSONL; ``hard=True`` adds flaky APIs (the reference solution retries, like a 
 
 from __future__ import annotations
 
+import json
 import random
+import re
 from typing import Any
 
 from . import calendar, cross, drive, github, gmail, jira, slack  # noqa: F401  (registers the families)
@@ -56,7 +58,12 @@ def validate(spec: Task, retries: int = 8) -> dict[str, Any]:
     ref = grade.get("reward", env.run.grade()["reward"]) if env.run else 0.0
     env.reset()
     _, null, *_ = env.step(_submit(""))
-    return {"reference_reward": ref, "null_reward": null, "ok": ref == 1.0 and null < 1.0,
+    # answer stuffing: every value in the world in one answer must not pass for knowing the answer
+    env.reset()
+    stuffing = " ".join(dict.fromkeys(re.findall(r"[$\w.,@-]+", json.dumps(env.run.worlds(), default=str))))[:20000]
+    _, stuffed, *_ = env.step(_submit(stuffing))
+    return {"reference_reward": ref, "null_reward": null, "stuffing_reward": stuffed,
+            "ok": ref == 1.0 and null < 1.0 and stuffed < 1.0,
             "failed": [c["name"] for c in grade.get("checks", []) if not c["passed"]]}
 
 

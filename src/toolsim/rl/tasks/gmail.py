@@ -87,10 +87,12 @@ def gmail_receipt_amount(rng: random.Random, seed: int) -> Task | None:
         return None
     vendor, number, amount = rng.choice(sorted(found))
     whole = amount.split(".")[0]
+    others = sorted({a.split(".")[0] for _, n, a in found if n != number and a.split(".")[0] != whole})
     return {"servers": servers,
             "task": f"How much did we pay on the {vendor} receipt #{number}? Answer with the amount.",
-            "checks": [{"name": "reported the right amount", "answer": {"matches": rf"\$?{re.escape(whole)}(\.00)?\b"},
-                        "weight": 3},
-                       {"name": "didn't send any email", "server": "gmail", "calls": "send_email", "count": 0,
-                        "must": True}],
+            "checks": [{"name": "reported the right amount", "weight": 3,
+                        "answer": {"matches": rf"\$?{re.escape(whole)}(\.00)?\b", "max_len": 300,
+                                   "not": [rf"\${re.escape(o)}\b" for o in others[:20]]}},
+                       {"name": "changed nothing", "server": "gmail", "calls": "*", "where": {"committed": True},
+                        "count": 0, "must": True}],
             "reference": [_call("gmail__search_emails", query=f"receipt {number}"), _submit(f"${amount}")]}

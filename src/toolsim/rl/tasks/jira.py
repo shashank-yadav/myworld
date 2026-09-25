@@ -39,3 +39,29 @@ def jira_reassign(rng: random.Random, seed: int) -> Task | None:
                         "where": {"assignee": uid, "!project": proj, "!status": "Done"}, "count": elsewhere}],
             "reference": [*(_call("jira__jira_assign_issue", issue_key=i["key"], assignee=to["email"] or other)
                             for i in targets), _submit(f"Reassigned {len(targets)} issues.")]}
+
+
+@family("jira.to_review", "jira")
+def jira_to_review(rng: random.Random, seed: int) -> Task | None:
+    """Move a To Do issue to In Review (through the workflow) with a comment."""
+    servers = _servers("jira")
+    st = _world(servers, seed).instances["jira"].state
+    todo = sorted((i["key"] for i in st["issues"].values() if i["status"] == "To Do"),
+                  key=lambda k: (k.split("-")[0], int(k.split("-")[1])))
+    if not todo:
+        return None
+    key = rng.choice(todo)
+    note = rng.choice(["Fix is up, ready for review", "Patched on staging, please review", "PR linked, needs a review"])
+    return {"servers": servers,
+            "task": f"Move {key} to In Review and add the comment \"{note}\".",
+            "checks": [
+                {"name": f"{key} is In Review", "server": "jira", "state": "issues", "weight": 2,
+                 "where": {"key": key, "status": "In Review"}, "count": 1},
+                {"name": "commented", "server": "jira", "state": "issues",
+                 "where": {"key": key, "comments.body~": note}, "count": 1},
+                {"name": "no other issue moved", "server": "jira", "calls": "jira_transition_issue", "must": True,
+                 "where": {"!args.issue_key": key}, "count": 0}],
+            "reference": [_call("jira__jira_get_transitions", issue_key=key),
+                          _call("jira__jira_transition_issue", issue_key=key, transition_id="11"),
+                          _call("jira__jira_transition_issue", issue_key=key, transition_id="21"),
+                          _call("jira__jira_add_comment", issue_key=key, body=note), _submit("Done.")]}

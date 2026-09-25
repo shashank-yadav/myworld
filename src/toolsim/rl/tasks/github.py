@@ -72,3 +72,33 @@ def github_merge_if_green(rng: random.Random, seed: int) -> Task | None:
             "task": f"Pull request #{n} in acme/api: if its CI is passing, squash-merge it. If it isn't, don't merge; "
                     "leave a comment on the PR saying CI is failing.",
             "checks": checks, "reference": ref}
+
+
+@family("github.close_questions", "github")
+def github_close_questions(rng: random.Random, seed: int) -> Task | None:
+    """Close every open question issue with a comment, leaving everything else open."""
+    servers = _servers("github")
+    repo = _world(servers, seed).instances["github"].state["repos"]["acme/api"]
+    issues = list(repo["issues"].values())
+    targets = sorted((i for i in issues if not i["is_pull"] and i["state"] == "open" and "question" in i["labels"]),
+                     key=lambda i: i["number"])
+    if not 1 <= len(targets) <= 6:
+        return None
+    other_open = sum(not i["is_pull"] and i["state"] == "open" and "question" not in i["labels"] for i in issues)
+    closed_prs = sum(i["is_pull"] and i["state"] == "closed" for i in issues)
+    url = "https://docs.acme.com/faq"
+    return {"servers": servers,
+            "task": f"In acme/api, close every open issue labeled \"question\", each with a comment pointing to {url}.",
+            "checks": [*({"name": f"#{i['number']} closed", "server": "github", "state": "repos[acme/api].issues",
+                          "where": {"number": i["number"], "state": "closed"}, "count": 1} for i in targets),
+                       *({"name": f"#{i['number']} got the FAQ link", "server": "github", "calls": "add_issue_comment",
+                          "where": {"args.issue_number": i["number"], "args.body~": "docs.acme.com/faq"}, "min": 1}
+                         for i in targets),
+                       {"name": "other issues left open", "server": "github", "state": "repos[acme/api].issues",
+                        "must": True, "where": {"is_pull": False, "state": "open", "!labels": ["question"]},
+                        "count": other_open},
+                       {"name": "no pull request closed", "server": "github", "state": "repos[acme/api].issues",
+                        "must": True, "where": {"is_pull": True, "state": "closed"}, "count": closed_prs}],
+            "reference": [x for i in targets for x in (
+                _call("github__add_issue_comment", **REPO, issue_number=i["number"], body=f"Answered in our FAQ: {url}"),
+                _call("github__update_issue", **REPO, issue_number=i["number"], state="closed"))] + [_submit("Closed.")]}
