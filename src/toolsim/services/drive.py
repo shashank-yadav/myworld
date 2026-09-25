@@ -106,6 +106,12 @@ class Drive(Service):
                                  "policy": {"external_sharing": True, **(seed.get("policy") or {})}, "files": {}}
         root = _new_file(ctx, state, "My Drive", FOLDER, None, owner=me, fid="root")
         root["parents"] = []
+        state["roots"] = {me: "root"}
+        for person in seed.get("people", []):  # colleagues whose agents can join get their own My Drive
+            email = person["email"].lower()
+            proot = _new_file(ctx, state, "My Drive", FOLDER, None, owner=email)
+            proot["parents"] = []
+            state["roots"][email] = proot["id"]
         keys = {}
         for f in seed.get("folders", []):
             parent = keys.get(f.get("parent"), "root")
@@ -113,12 +119,20 @@ class Drive(Service):
         for f in seed.get("files", []):
             owner = f.get("owner", me)
             mime = f.get("mimeType") or TYPES.get(f.get("type", "text"), "text/plain")
-            parent = keys.get(f.get("parent"), "root" if owner == me else None)
+            parent = keys.get(f.get("parent"), state["roots"].get(owner))
             nf = _new_file(ctx, state, f["name"], mime, parent, owner=owner, content=f.get("content"), size=f.get("size"))
             nf["trashed"] = bool(f.get("trashed"))
             if owner != me:
                 _grant(ctx, state, nf, "user", f.get("shared_role", "reader"), me)
         return state
+
+    actor_key = "me"
+
+    def resolve_actor(self, state: dict[str, Any], identity: str) -> str:
+        email = identity.strip().lower()
+        if email not in state.get("roots", {}) and email != state["me"]:
+            raise ValueError(f"no Drive user {identity} in this environment")
+        return email
 
     def fault_error(self, fault: Any) -> tuple[Any, int]:
         if fault.kind == "rate_limit":
@@ -166,6 +180,8 @@ def _my_role(state: dict[str, Any], f: dict[str, Any]) -> str | None:
 
 
 def _file(state: dict[str, Any], fid: str, need: str = "reader", allow_trashed: bool = True) -> dict[str, Any]:
+    if fid == "root":  # 'root' is the acting user's own My Drive
+        fid = state.get("roots", {}).get(state["me"], "root")
     f = state["files"].get(fid)
     role = _my_role(state, f) if f else None
     if f is None or role is None:

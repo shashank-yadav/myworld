@@ -59,7 +59,7 @@ class Gmail(Service):
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
-        ids = list(ctx.state["messages"])
+        ids = list(_mb(ctx)["messages"])
         c("search_emails", {"query": "is:unread"})
         c("search_emails", {"query": "from:john OR has:attachment newer_than:7d"})
         c("read_email", {"messageId": ids[0]})
@@ -100,23 +100,28 @@ class Gmail(Service):
         }
 
     def initial_state(self, seed: dict[str, Any], ctx: Instance) -> dict[str, Any]:
-        user = seed.get("user") or {"email": "alex@acme.com", "name": "Alex Rivera"}
-        state: dict[str, Any] = {"user": user, "labels": {}, "messages": {}, "drafts": {}, "filters": {},
-                                 "downloads": [], "_threads": {}}
-        for name in SYSTEM_LABELS:
-            state["labels"][name] = {"id": name, "name": name, "type": "system"}
-        for name in seed.get("labels", []):
-            _new_label(ctx, state, name if isinstance(name, str) else name["name"])
-        for e in sorted(seed.get("emails", []), key=lambda e: str(e.get("date") or "")):
-            labels = []
-            for lab in e.get("labels", ["INBOX"]):
-                labels.append(lab if lab in state["labels"] else _label_by_name(state, lab)
-                              or _new_label(ctx, state, lab)["id"])
-            _store(ctx, state, sender=e.get("from", "unknown@example.com"), to=_list(e.get("to")),
-                   cc=_list(e.get("cc")), bcc=_list(e.get("bcc")), subject=e.get("subject", ""),
-                   body=e.get("body", ""), labels=labels, date=_parse_time(e.get("date"), ctx.now()),
-                   thread_key=e.get("thread"), attachments=e.get("attachments") or [])
+        """One mailbox per person. The seed's top-level user/labels/emails is the default mailbox;
+        ``mailboxes: [{user, labels, emails}, ...]`` adds colleagues whose agents can join."""
+        primary = {k: seed[k] for k in ("user", "labels", "emails") if k in seed}
+        state: dict[str, Any] = {"mailboxes": {}}
+        for box in [primary, *seed.get("mailboxes", [])]:
+            user = box.get("user") or {"email": "alex@acme.com", "name": "Alex Rivera"}
+            state["mailboxes"][user["email"].lower()] = _new_mailbox(ctx, box, user)
+        state["default"] = next(iter(state["mailboxes"]))
         return state
+
+    def default_actor(self, state: dict[str, Any]) -> str:
+        return state["default"]
+
+    def resolve_actor(self, state: dict[str, Any], identity: str) -> str:
+        email = _addr(identity)
+        if email not in state["mailboxes"]:
+            raise ValueError(f"no mailbox for {identity} in this environment")
+        return email
+
+    def grading_view(self, state: dict[str, Any]) -> dict[str, Any]:
+        """The default mailbox at the top level (``state: messages``), every mailbox under ``mailboxes``."""
+        return {**state["mailboxes"][state["default"]], "mailboxes": state["mailboxes"]}
 
     def render(self, value: Any) -> str:
         if isinstance(value, dict) and isinstance(value.get("error"), dict):
@@ -133,6 +138,67 @@ class Gmail(Service):
 
 
 # -- state helpers -----------------------------------------------------------------------
+
+def _new_mailbox(ctx: Instance, seed: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    box: dict[str, Any] = {"user": user, "labels": {}, "messages": {}, "drafts": {}, "filters": {},
+                           "downloads": [], "_threads": {}}
+    for name in SYSTEM_LABELS:
+        box["labels"][name] = {"id": name, "name": name, "type": "system"}
+    for name in seed.get("labels", []):
+        _new_label(ctx, box, name if isinstance(name, str) else name["name"])
+    for e in sorted(seed.get("emails", []), key=lambda e: str(e.get("date") or "")):
+        labels = []
+        for lab in e.get("labels", ["INBOX"]):
+            labels.append(lab if lab in box["labels"] else _label_by_name(box, lab) or _new_label(ctx, box, lab)["id"])
+        _store(ctx, box, sender=e.get("from", "unknown@example.com"), to=_list(e.get("to")), cc=_list(e.get("cc")),
+               bcc=_list(e.get("bcc")), subject=e.get("subject", ""), body=e.get("body", ""), labels=labels,
+               date=_parse_time(e.get("date"), ctx.now()), thread_key=e.get("thread"),
+               attachments=e.get("attachments") or [])
+    return box
+
+
+def _mb(ctx: Instance) -> dict[str, Any]:
+    """The mailbox of whoever this call acts as."""
+    return ctx.state["mailboxes"][ctx.actor]
+
+
+def _deliver(ctx: Instance, sent: dict[str, Any], sender_box: dict[str, Any]) -> list[str]:
+    """Put a copy of a sent message in every recipient mailbox that exists in this world.
+    The copy keeps the RFC 822 Message-ID, lands in the recipient's thread for the same
+    conversation, and passes through the recipient's filters."""
+    delivered = []
+    sender = sender_box["user"]["email"].lower()
+    refs = {m["messageId"] for m in sender_box["messages"].values() if m["threadId"] == sent["threadId"]}
+    for rcpt in dict.fromkeys(_addr(a) for a in [*sent["to"], *sent["cc"], *sent["bcc"]]):
+        box = ctx.state["mailboxes"].get(rcpt)
+        if box is None or rcpt == sender:
+            continue
+        thread = next((m["threadId"] for m in box["messages"].values() if m["messageId"] in refs), None)
+        copy_ = _store(ctx, box, sender=sent["from"], to=sent["to"], cc=sent["cc"], bcc=[], subject=sent["subject"],
+                       body=sent["body"], html_body=sent.get("htmlBody"), labels=["INBOX", "UNREAD"], date=ctx.now(),
+                       thread_id=thread, attachments=[{k: a[k] for k in ("filename", "mimeType", "size")}
+                                                      for a in sent["attachments"]])
+        copy_["messageId"] = sent["messageId"]
+        _apply_filters(box, copy_, ctx)
+        delivered.append(rcpt)
+    return delivered
+
+
+def _apply_filters(box: dict[str, Any], msg: dict[str, Any], ctx: Instance) -> None:
+    for f in box["filters"].values():
+        c = f["criteria"]
+        terms = []
+        for k in ("from", "to", "subject"):
+            if c.get(k):
+                terms.append(f'{k}:"{c[k]}"')
+        if c.get("query"):
+            terms.append(c["query"])
+        if c.get("hasAttachment"):
+            terms.append("has:attachment")
+        if terms and _matches(box, msg, " ".join(terms), ctx.now()):
+            a = f["action"]
+            msg["labelIds"] = [l for l in dict.fromkeys(msg["labelIds"] + list(a.get("addLabelIds") or []))
+                               if l not in (a.get("removeLabelIds") or [])]
 
 def _list(v: Any) -> list[str]:
     if not v:
@@ -283,7 +349,7 @@ def send_email(ctx: Instance,
                threadId: Annotated[str | None, "Thread ID to reply to"] = None,
                inReplyTo: Annotated[str | None, "Message ID being replied to"] = None) -> str:
     """Sends a new email"""
-    s = ctx.state
+    s = _mb(ctx)
     if not to:
         raise _invalid("Recipient address required")
     for a in [*to, *(cc or []), *(bcc or [])]:
@@ -298,6 +364,7 @@ def send_email(ctx: Instance,
     # mail to yourself lands in your inbox too
     if user["email"].lower() in {_addr(a) for a in [*to, *(cc or [])]}:
         msg["labelIds"] += ["INBOX", "UNREAD"]
+    _deliver(ctx, msg, s)  # colleagues in this world actually receive it
     return f"Email sent successfully with ID: {msg['id']}"
 
 
@@ -314,7 +381,7 @@ def draft_email(ctx: Instance,
                 threadId: Annotated[str | None, "Thread ID to reply to"] = None,
                 inReplyTo: Annotated[str | None, "Message ID being replied to"] = None) -> str:
     """Draft a new email"""
-    s, user = ctx.state, ctx.state["user"]
+    s, user = _mb(ctx), _mb(ctx)["user"]
     msg = _store(ctx, s, sender=f"{user['name']} <{user['email']}>", to=to, cc=cc or [], bcc=bcc or [],
                  subject=subject, body=body, html_body=htmlBody, labels=["DRAFT"], date=ctx.now(), thread_id=threadId)
     did = "r" + "".join(ctx.rng.choice("0123456789") for _ in range(19))
@@ -325,7 +392,7 @@ def draft_email(ctx: Instance,
 @tool("read_email", read_only=True)
 def read_email(ctx: Instance, messageId: Annotated[str, "ID of the email message to retrieve"]) -> str:
     """Retrieves the content of a specific email"""
-    m = _get(ctx.state, messageId)
+    m = _get(_mb(ctx), messageId)
     out = (f"Thread ID: {m['threadId']}\nSubject: {m['subject']}\nFrom: {m['from']}\nTo: {', '.join(m['to'])}\n"
            + (f"Cc: {', '.join(m['cc'])}\n" if m["cc"] else "") + f"Date: {m['date']}\n\n{m['body']}")
     if m["attachments"]:
@@ -341,12 +408,12 @@ def download_attachment(ctx: Instance,
                         filename: Annotated[str | None, "Filename to save the attachment as"] = None,
                         savePath: Annotated[str | None, "Directory path to save the attachment"] = None) -> str:
     """Downloads an email attachment to a specified location"""
-    m = _get(ctx.state, messageId)
+    m = _get(_mb(ctx), messageId)
     att = next((a for a in m["attachments"] if a["attachmentId"] == attachmentId), None)
     if att is None:
         raise _not_found()
     path = f"{(savePath or '.').rstrip('/')}/{filename or att['filename']}"
-    ctx.state["downloads"].append({"messageId": messageId, "attachmentId": attachmentId, "path": path})
+    _mb(ctx)["downloads"].append({"messageId": messageId, "attachmentId": attachmentId, "path": path})
     return (f"Attachment downloaded successfully:\nFile: {filename or att['filename']}\nSize: {att['size']} bytes\n"
             f"Saved to: {path}")
 
@@ -356,7 +423,7 @@ def search_emails(ctx: Instance,
                   query: Annotated[str, "Gmail search query (e.g., 'from:example@gmail.com')"],
                   maxResults: Annotated[int | None, "Maximum number of results to return"] = None) -> str:
     """Searches for emails using Gmail search syntax"""
-    s = ctx.state
+    s = _mb(ctx)
     hits = [m for m in s["messages"].values() if _matches(s, m, query, ctx.now())]
     hits.sort(key=lambda m: int(m["internalDate"]), reverse=True)
     hits = hits[: maxResults or 10]
@@ -370,7 +437,7 @@ def modify_email(ctx: Instance,
                  addLabelIds: Annotated[list[str] | None, "List of label IDs to add to the message"] = None,
                  removeLabelIds: Annotated[list[str] | None, "List of label IDs to remove from the message"] = None) -> str:
     """Modifies email labels (move to different folders)"""
-    s = ctx.state
+    s = _mb(ctx)
     m = _get(s, messageId)
     add = _check_labels(s, (addLabelIds or []) + (labelIds or []))
     remove = _check_labels(s, removeLabelIds)
@@ -381,15 +448,15 @@ def modify_email(ctx: Instance,
 @tool("delete_email", destructive=True, idempotent=True)
 def delete_email(ctx: Instance, messageId: Annotated[str, "ID of the email message to delete"]) -> str:
     """Permanently deletes an email"""
-    _get(ctx.state, messageId)
-    del ctx.state["messages"][messageId]
+    _get(_mb(ctx), messageId)
+    del _mb(ctx)["messages"][messageId]
     return f"Email {messageId} deleted successfully"
 
 
 @tool("list_email_labels", read_only=True)
 def list_email_labels(ctx: Instance) -> str:
     """Retrieves all available Gmail labels"""
-    labels = list(ctx.state["labels"].values())
+    labels = list(_mb(ctx)["labels"].values())
     system = [l for l in labels if l["type"] == "system"]
     user = [l for l in labels if l["type"] == "user"]
     fmt = lambda l: f"ID: {l['id']}\nName: {l['name']}\n"  # noqa: E731
@@ -404,7 +471,7 @@ def batch_modify_emails(ctx: Instance,
                         removeLabelIds: Annotated[list[str] | None, "List of label IDs to remove from all messages"] = None,
                         batchSize: Annotated[int | None, "Number of messages to process in each batch (default: 50)"] = 50) -> str:
     """Modifies labels for multiple emails in batches"""
-    s = ctx.state
+    s = _mb(ctx)
     add, remove = _check_labels(s, addLabelIds), _check_labels(s, removeLabelIds)
     ok, failed = [], []
     for mid in messageIds:
@@ -426,7 +493,7 @@ def batch_delete_emails(ctx: Instance,
                         messageIds: Annotated[list[str], "List of message IDs to delete"],
                         batchSize: Annotated[int | None, "Number of messages to process in each batch (default: 50)"] = 50) -> str:
     """Permanently deletes multiple emails in batches"""
-    s = ctx.state
+    s = _mb(ctx)
     ok = [m for m in messageIds if s["messages"].pop(m, None) is not None]
     failed = [m for m in messageIds if m not in ok]
     out = f"Batch delete operation complete.\nSuccessfully deleted: {len(ok)} messages\n"
@@ -446,7 +513,7 @@ def create_label(ctx: Instance,
                  messageListVisibility: Annotated[Literal["show", "hide"] | None, "Whether to show or hide the label in the message list"] = None,
                  labelListVisibility: Annotated[Literal["labelShow", "labelShowIfUnread", "labelHide"] | None, "Visibility of the label in the label list"] = None) -> str:
     """Creates a new Gmail label"""
-    s = ctx.state
+    s = _mb(ctx)
     if _label_by_name(s, name):
         raise ToolError({"error": {"code": 409, "message": "Label name exists or conflicts", "status": "ALREADY_EXISTS"}},
                         status=409)
@@ -461,7 +528,7 @@ def update_label(ctx: Instance,
                  messageListVisibility: Annotated[Literal["show", "hide"] | None, "Whether to show or hide the label in the message list"] = None,
                  labelListVisibility: Annotated[Literal["labelShow", "labelShowIfUnread", "labelHide"] | None, "Visibility of the label in the label list"] = None) -> str:
     """Updates an existing Gmail label"""
-    l = ctx.state["labels"].get(id)
+    l = _mb(ctx)["labels"].get(id)
     if l is None:
         raise _not_found()
     if l["type"] == "system":
@@ -476,7 +543,7 @@ def update_label(ctx: Instance,
 @tool("delete_label", destructive=True, idempotent=True)
 def delete_label(ctx: Instance, id: Annotated[str, "ID of the label to delete"]) -> str:
     """Deletes a Gmail label"""
-    s = ctx.state
+    s = _mb(ctx)
     l = s["labels"].get(id)
     if l is None:
         raise _not_found()
@@ -494,7 +561,7 @@ def get_or_create_label(ctx: Instance,
                         messageListVisibility: Annotated[Literal["show", "hide"] | None, "Whether to show or hide the label in the message list"] = None,
                         labelListVisibility: Annotated[Literal["labelShow", "labelShowIfUnread", "labelHide"] | None, "Visibility of the label in the label list"] = None) -> str:
     """Gets an existing label by name or creates it if it doesn't exist"""
-    s = ctx.state
+    s = _mb(ctx)
     existing = _label_by_name(s, name)
     if existing:
         return _label_text("Successfully found existing label:", s["labels"][existing])
@@ -513,7 +580,7 @@ def create_filter(ctx: Instance,
                   criteria: Annotated[dict, "Criteria for matching emails (from, to, subject, query, negatedQuery, hasAttachment, size, sizeComparison)"],
                   action: Annotated[dict, "Actions to perform on matching emails (addLabelIds, removeLabelIds, forward)"]) -> str:
     """Creates a new Gmail filter with custom criteria and actions"""
-    s = ctx.state
+    s = _mb(ctx)
     if not criteria:
         raise _invalid("Filter criteria must not be empty")
     _check_labels(s, action.get("addLabelIds"))
@@ -526,7 +593,7 @@ def create_filter(ctx: Instance,
 @tool("list_filters", read_only=True)
 def list_filters(ctx: Instance) -> str:
     """Retrieves all Gmail filters"""
-    fs = list(ctx.state["filters"].values())
+    fs = list(_mb(ctx)["filters"].values())
     if not fs:
         return "No filters found."
     return f"Found {len(fs)} filters:\n\n" + "\n".join(_filter_text(f) for f in fs)
@@ -535,7 +602,7 @@ def list_filters(ctx: Instance) -> str:
 @tool("get_filter", read_only=True)
 def get_filter(ctx: Instance, filterId: Annotated[str, "ID of the filter to retrieve"]) -> str:
     """Gets details of a specific Gmail filter"""
-    f = ctx.state["filters"].get(filterId)
+    f = _mb(ctx)["filters"].get(filterId)
     if f is None:
         raise _not_found()
     return "Filter details:\n" + _filter_text(f)
@@ -544,7 +611,7 @@ def get_filter(ctx: Instance, filterId: Annotated[str, "ID of the filter to retr
 @tool("delete_filter", destructive=True, idempotent=True)
 def delete_filter(ctx: Instance, filterId: Annotated[str, "ID of the filter to delete"]) -> str:
     """Deletes a Gmail filter"""
-    if ctx.state["filters"].pop(filterId, None) is None:
+    if _mb(ctx)["filters"].pop(filterId, None) is None:
         raise _not_found()
     return f"Filter {filterId} deleted successfully."
 

@@ -83,19 +83,42 @@ class Calendar(Service):
         }
 
     def initial_state(self, seed: dict[str, Any], ctx: Instance) -> dict[str, Any]:
+        """A company calendar system: every person has a primary calendar (keyed by email).
+        ``people: [{email, name}]`` adds colleagues whose agents can join; ``calendars`` adds
+        other calendars with the default user's access role (e.g. a colleague's free/busy)."""
         user = seed.get("user") or {"email": "alex@acme.com", "name": "Alex Rivera"}
         tz = seed.get("timeZone", "America/Los_Angeles")
-        state: dict[str, Any] = {"user": user, "timeZone": tz, "calendars": {}, "events": {}, "busy": {}}
-        state["calendars"]["primary"] = {"id": user["email"], "summary": user["name"], "timeZone": tz,
-                                         "accessRole": "owner", "primary": True}
+        state: dict[str, Any] = {"default": user["email"].lower(), "timeZone": tz, "people": {}, "calendars": {},
+                                 "events": {}, "busy": {}}
+        for person in [user, *seed.get("people", [])]:
+            email = person["email"].lower()
+            state["people"][email] = {"email": email, "name": person.get("name", email)}
+            state["calendars"][email] = {"id": email, "summary": person.get("name", email),
+                                         "timeZone": person.get("timeZone", tz), "acl": {email: "owner"},
+                                         "domainRole": "freeBusyReader", "person": True}
         for c in seed.get("calendars", []):
-            state["calendars"][c["id"]] = {"id": c["id"], "summary": c.get("summary", c["id"]),
-                                           "timeZone": c.get("timeZone", tz), "accessRole": c.get("accessRole", "reader"),
-                                           "primary": False}
-            state["busy"][c["id"]] = [{"start": b["start"], "end": b["end"]} for b in c.get("busy", [])]
+            cid = c["id"].lower()
+            if cid in state["calendars"]:  # a colleague who is also a person here: keep the real calendar
+                state["busy"][cid] = [{"start": b["start"], "end": b["end"]} for b in c.get("busy", [])]
+                continue
+            state["calendars"][cid] = {"id": c["id"], "summary": c.get("summary", c["id"]), "timeZone": c.get("timeZone", tz),
+                                       "acl": dict(c.get("acl") or {}), "domainRole": c.get("accessRole", "reader"),
+                                       "person": "@" in c["id"] and not c["id"].startswith("team")}
+            state["busy"][cid] = [{"start": b["start"], "end": b["end"]} for b in c.get("busy", [])]
         for e in seed.get("events", []):
-            _new_event(ctx, state, e.get("calendarId", "primary"), e)
+            organizer = (e.get("organizer") or state["default"]).lower()
+            cid = e.get("calendarId", "primary")
+            _new_event(ctx, state, organizer if cid == "primary" else cid, e, actor=organizer)
         return state
+
+    def default_actor(self, state: dict[str, Any]) -> str:
+        return state["default"]
+
+    def resolve_actor(self, state: dict[str, Any], identity: str) -> str:
+        email = identity.strip().lower()
+        if email not in state["people"]:
+            raise ValueError(f"no calendar user {identity} in this environment")
+        return email
 
     def fault_error(self, fault: Any) -> tuple[Any, int]:
         if fault.kind == "rate_limit":
@@ -105,19 +128,30 @@ class Calendar(Service):
 
 # -- helpers -----------------------------------------------------------------------------
 
-def _cal(state: dict[str, Any], calendar_id: str | None) -> tuple[str, dict[str, Any]]:
-    cid = calendar_id or "primary"
-    if cid == state["user"]["email"]:
-        cid = "primary"
+def _role(cal: dict[str, Any], actor: str) -> str:
+    return cal["acl"].get(actor) or cal["domainRole"]
+
+
+def _cal(ctx: Instance, calendar_id: str | None) -> tuple[str, dict[str, Any]]:
+    """Resolve a calendar id for the acting user ('primary' = their own)."""
+    state = ctx.state
+    cid = (calendar_id or "primary").lower()
+    if cid == "primary":
+        cid = ctx.actor
     cal = state["calendars"].get(cid)
     if cal is None:
         raise _err(404, "Not Found", "notFound")
     return cid, cal
 
 
-def _writable(cal: dict[str, Any]) -> None:
-    if cal["accessRole"] not in ("owner", "writer"):
+def _writable(ctx: Instance, cal: dict[str, Any]) -> None:
+    if _role(cal, ctx.actor) not in ("owner", "writer"):
         raise _err(403, "You need to have writer access to this calendar.", "requiredAccessLevel")
+
+
+def _readable(ctx: Instance, cal: dict[str, Any]) -> None:
+    if _role(cal, ctx.actor) == "freeBusyReader":
+        raise _err(403, "Not allowed to read events on this calendar (free/busy access only).", "forbidden")
 
 
 def _parse(v: Any, tz: str) -> dt.datetime:
@@ -134,40 +168,46 @@ def _when(t: dt.datetime, tz: str) -> dict[str, str]:
     return {"dateTime": t.astimezone(ZoneInfo(tz)).isoformat(), "timeZone": tz}
 
 
-def _new_event(ctx: Instance, state: dict[str, Any], calendar_id: str, e: dict[str, Any]) -> dict[str, Any]:
-    cid, cal = _cal(state, calendar_id)
+def _new_event(ctx: Instance, state: dict[str, Any], calendar_id: str, e: dict[str, Any], actor: str) -> dict[str, Any]:
+    cal = state["calendars"][calendar_id]
     tz = e.get("timeZone") or cal["timeZone"]
     start, end = _parse(e["start"], tz), _parse(e["end"], tz)
     if end <= start:
         raise _err(400, "The specified time range is empty.", "timeRangeEmpty")
     eid = ctx.token(26, "abcdefghijklmnopqrstuv0123456789")
-    me = state["user"]["email"]
-    attendees = [{"email": a if isinstance(a, str) else a["email"],
+    attendees = [{"email": (a if isinstance(a, str) else a["email"]).lower(),
                   "responseStatus": (a.get("responseStatus") if isinstance(a, dict) else None) or "needsAction"}
                  for a in e.get("attendees") or []]
-    if attendees and cid == "primary" and not any(a["email"] == me for a in attendees):
-        attendees.insert(0, {"email": me, "organizer": True, "self": True, "responseStatus": "accepted"})
+    if attendees and calendar_id == actor and not any(a["email"] == actor for a in attendees):
+        attendees.insert(0, {"email": actor, "organizer": True, "responseStatus": "accepted"})
     now = ctx.now().isoformat()
-    ev = {"kind": "calendar#event", "id": eid, "calendarId": cid, "status": "confirmed",
+    ev = {"kind": "calendar#event", "id": eid, "calendarId": calendar_id, "status": "confirmed",
           "htmlLink": f"https://www.google.com/calendar/event?eid={eid}", "created": now, "updated": now,
           "summary": e.get("summary", "(No title)"), "description": e.get("description"), "location": e.get("location"),
-          "creator": {"email": me, "self": True}, "organizer": {"email": cal["id"], "self": cid == "primary"},
+          "creator": {"email": actor}, "organizer": {"email": cal["id"]},
           "start": _when(start, tz), "end": _when(end, tz), "attendees": attendees or None,
           "colorId": e.get("colorId"), "transparency": e.get("transparency", "opaque"),
-          "recurrence": e.get("recurrence"), "iCalUID": f"{eid}@google.com", "sequence": 0}
+          "recurrence": e.get("recurrence"), "iCalUID": f"{eid}@google.com", "sequence": 0, "hiddenFor": []}
     state["events"][eid] = {k: v for k, v in ev.items() if v is not None}
     return state["events"][eid]
 
 
-def _event(state: dict[str, Any], calendar_id: str | None, event_id: str) -> dict[str, Any]:
-    cid, _ = _cal(state, calendar_id)
-    ev = state["events"].get(event_id)
-    if ev is None or ev["calendarId"] != cid or ev["status"] == "cancelled":
+def _on_calendar(ev: dict[str, Any], cid: str) -> bool:
+    """Is this event shown on calendar ``cid``? Its own calendar, or an attendee's."""
+    if ev["status"] == "cancelled" or cid in ev.get("hiddenFor", []):
+        return False
+    return ev["calendarId"] == cid or any(a["email"] == cid for a in ev.get("attendees", []))
+
+
+def _event(ctx: Instance, calendar_id: str | None, event_id: str) -> dict[str, Any]:
+    cid, cal = _cal(ctx, calendar_id)
+    ev = ctx.state["events"].get(event_id)
+    if ev is None or not _on_calendar(ev, cid):
         raise _err(404, "Not Found", "notFound")
     return ev
 
 
-def _range(state: dict[str, Any], time_min: str | None, time_max: str | None, tz: str) -> tuple[Any, Any]:
+def _range(time_min: str | None, time_max: str | None, tz: str) -> tuple[Any, Any]:
     lo = _parse(time_min, tz) if time_min else None
     hi = _parse(time_max, tz) if time_max else None
     if lo and hi and hi <= lo:
@@ -186,8 +226,15 @@ def _calendar_ids(v: Any) -> list[str]:
     return [v] if isinstance(v, str) else list(v)
 
 
-def _view(ev: dict[str, Any]) -> dict[str, Any]:
-    return {k: v for k, v in ev.items() if k != "calendarId"}
+def _view(ctx: Instance, ev: dict[str, Any]) -> dict[str, Any]:
+    """The event as the acting user sees it (``self`` flags are relative to them)."""
+    me = ctx.actor
+    out = {k: v for k, v in ev.items() if k not in ("calendarId", "hiddenFor")}
+    out["creator"] = {**ev["creator"], "self": ev["creator"]["email"] == me}
+    out["organizer"] = {**ev["organizer"], "self": ev["organizer"]["email"] == me}
+    if ev.get("attendees"):
+        out["attendees"] = [{**a, "self": True} if a["email"] == me else dict(a) for a in ev["attendees"]]
+    return out
 
 
 # -- tools -------------------------------------------------------------------------------
@@ -195,8 +242,11 @@ def _view(ev: dict[str, Any]) -> dict[str, Any]:
 @tool("list-calendars", read_only=True)
 def list_calendars(ctx: Instance) -> dict[str, Any]:
     """List all available calendars"""
+    me = ctx.actor
     return {"calendars": [{"id": c["id"], "summary": c["summary"], "timeZone": c["timeZone"],
-                           "accessRole": c["accessRole"], "primary": c["primary"]} for c in ctx.state["calendars"].values()]}
+                           "accessRole": _role(c, me), "primary": cid == me}
+                          for cid, c in ctx.state["calendars"].items()
+                          if not c.get("person") or cid == me or cid in ctx.state["busy"] or c["acl"].get(me)]}
 
 
 @tool("list-events", read_only=True)
@@ -208,14 +258,12 @@ def list_events(ctx: Instance,
     """List events from one or more calendars with date filtering"""
     s = ctx.state
     tz = timeZone or s["timeZone"]
-    lo, hi = _range(s, timeMin, timeMax, tz)
+    lo, hi = _range(timeMin, timeMax, tz)
     out = []
     for cid_in in _calendar_ids(calendarId):
-        cid, cal = _cal(s, cid_in)
-        if cal["accessRole"] == "freeBusyReader":
-            raise _err(403, "Not allowed to read events on this calendar (free/busy access only).", "forbidden")
-        out += [_view(e) for e in s["events"].values()
-                if e["calendarId"] == cid and e["status"] != "cancelled" and _in_range(e, lo, hi, tz)]
+        cid, cal = _cal(ctx, cid_in)
+        _readable(ctx, cal)
+        out += [_view(ctx, e) for e in s["events"].values() if _on_calendar(e, cid) and _in_range(e, lo, hi, tz)]
     out.sort(key=lambda e: _parse(e["start"], tz))
     return {"events": out, "totalCount": len(out)}
 
@@ -225,7 +273,8 @@ def get_event(ctx: Instance,
               eventId: Annotated[str, "ID of the event to retrieve"],
               calendarId: Annotated[str | None, "ID of the calendar. Use 'primary' for the main calendar"] = "primary") -> dict[str, Any]:
     """Get details of a specific event by ID"""
-    return {"event": _view(_event(ctx.state, calendarId, eventId))}
+    _readable(ctx, _cal(ctx, calendarId)[1])
+    return {"event": _view(ctx, _event(ctx, calendarId, eventId))}
 
 
 @tool("search-events", read_only=True)
@@ -238,11 +287,12 @@ def search_events(ctx: Instance,
     """Search for events in a calendar by text query"""
     s = ctx.state
     tz = timeZone or s["timeZone"]
-    cid, _ = _cal(s, calendarId)
-    lo, hi = _range(s, timeMin, timeMax, tz)
+    cid, cal = _cal(ctx, calendarId)
+    _readable(ctx, cal)
+    lo, hi = _range(timeMin, timeMax, tz)
     q = query.lower()
-    hits = [_view(e) for e in s["events"].values()
-            if e["calendarId"] == cid and e["status"] != "cancelled" and _in_range(e, lo, hi, tz)
+    hits = [_view(ctx, e) for e in s["events"].values()
+            if _on_calendar(e, cid) and _in_range(e, lo, hi, tz)
             and q in " ".join([e.get("summary", ""), e.get("description") or "", e.get("location") or "",
                                *[a["email"] for a in e.get("attendees", [])]]).lower()]
     hits.sort(key=lambda e: _parse(e["start"], tz))
@@ -264,17 +314,17 @@ def create_event(ctx: Instance,
                  sendUpdates: Annotated[Literal["all", "externalOnly", "none"] | None, "Whether to send invitations"] = "all") -> dict[str, Any]:
     """Create a new calendar event"""
     s = ctx.state
-    _, cal = _cal(s, calendarId)
-    _writable(cal)
+    cid, cal = _cal(ctx, calendarId)
+    _writable(ctx, cal)
     if colorId and colorId not in COLORS:
         raise _err(400, f"Invalid color id: {colorId}")
-    ev = _new_event(ctx, s, calendarId or "primary", {
+    ev = _new_event(ctx, s, cid, {
         "summary": summary, "start": start, "end": end, "description": description, "timeZone": timeZone,
         "location": location, "colorId": colorId, "recurrence": recurrence,
-        "attendees": [a.get("email") if isinstance(a, dict) else a for a in attendees or []]})
+        "attendees": [a.get("email") if isinstance(a, dict) else a for a in attendees or []]}, actor=ctx.actor)
     if sendUpdates != "none" and ev.get("attendees"):
-        ev["invitationsSent"] = [a["email"] for a in ev["attendees"] if not a.get("self")]
-    return {"event": _view(ev)}
+        ev["invitationsSent"] = [a["email"] for a in ev["attendees"] if a["email"] != ctx.actor]
+    return {"event": _view(ctx, ev)}
 
 
 @tool("update-event", idempotent=True)
@@ -292,9 +342,9 @@ def update_event(ctx: Instance,
                  sendUpdates: Annotated[Literal["all", "externalOnly", "none"] | None, "Whether to send update notifications"] = "all") -> dict[str, Any]:
     """Update an existing calendar event"""
     s = ctx.state
-    _, cal = _cal(s, calendarId)
-    _writable(cal)
-    ev = _event(s, calendarId, eventId)
+    _, cal = _cal(ctx, calendarId)
+    ev = _event(ctx, calendarId, eventId)
+    _writable(ctx, s["calendars"][ev["calendarId"]])  # attendees can't edit the organizer's event
     tz = timeZone or ev["start"].get("timeZone") or cal["timeZone"]
     new_start = _parse(start, tz) if start else _parse(ev["start"], tz)
     new_end = _parse(end, tz) if end else _parse(ev["end"], tz)
@@ -311,7 +361,7 @@ def update_event(ctx: Instance,
                            for a in attendees]
     ev["updated"] = ctx.now().isoformat()
     ev["sequence"] = ev.get("sequence", 0) + 1
-    return {"event": _view(ev)}
+    return {"event": _view(ctx, ev)}
 
 
 @tool("delete-event", destructive=True, idempotent=False)
@@ -321,13 +371,20 @@ def delete_event(ctx: Instance,
                  sendUpdates: Annotated[Literal["all", "externalOnly", "none"] | None, "Whether to send cancellation notifications"] = "all") -> dict[str, Any]:
     """Delete a calendar event"""
     s = ctx.state
-    _, cal = _cal(s, calendarId)
-    _writable(cal)
+    cid, cal = _cal(ctx, calendarId)
+    _writable(ctx, cal)
     ev = s["events"].get(eventId)
-    if ev is not None and ev["status"] == "cancelled":
+    if ev is not None and (ev["status"] == "cancelled" or cid in ev.get("hiddenFor", [])):
         raise _err(410, "Resource has been deleted", "deleted")  # Google answers 410 Gone on a second delete
-    ev = _event(s, calendarId, eventId)
-    ev["status"] = "cancelled"
+    ev = _event(ctx, calendarId, eventId)
+    if ev["calendarId"] != cid:
+        # an attendee removing an invite from their calendar declines it; the organizer's event stays
+        for a in ev.get("attendees", []):
+            if a["email"] == cid:
+                a["responseStatus"] = "declined"
+        ev["hiddenFor"].append(cid)
+    else:
+        ev["status"] = "cancelled"
     ev["updated"] = ctx.now().isoformat()
     return {"success": True, "message": "Event deleted successfully"}
 
@@ -338,9 +395,8 @@ def respond_to_event(ctx: Instance,
                      response: Annotated[Literal["accepted", "declined", "tentative", "needsAction"], "Your response"],
                      calendarId: Annotated[str | None, "ID of the calendar. Use 'primary' for the main calendar"] = "primary") -> dict[str, Any]:
     """Respond to an event invitation (accept, decline, maybe, or no response)"""
-    s = ctx.state
-    ev = _event(s, calendarId, eventId)
-    me = s["user"]["email"]
+    ev = _event(ctx, calendarId, eventId)
+    me = ctx.actor
     mine = next((a for a in ev.get("attendees", []) if a["email"] == me), None)
     if mine is None:
         raise _err(400, "You are not an attendee of this event.", "notAnAttendee")
@@ -348,7 +404,7 @@ def respond_to_event(ctx: Instance,
         raise _err(400, "The organizer cannot respond to their own event.", "organizerResponse")
     mine["responseStatus"] = response
     ev["updated"] = ctx.now().isoformat()
-    return {"event": _view(ev), "responseStatus": response}
+    return {"event": _view(ctx, ev), "responseStatus": response}
 
 
 @tool("get-freebusy", read_only=True)
@@ -360,18 +416,19 @@ def get_freebusy(ctx: Instance,
     """Query free/busy information for calendars, including other people's"""
     s = ctx.state
     tz = timeZone or s["timeZone"]
-    lo, hi = _range(s, timeMin, timeMax, tz)
+    lo, hi = _range(timeMin, timeMax, tz)
     out: dict[str, Any] = {}
     for c in calendars:
         raw = c.get("id") if isinstance(c, dict) else c
-        cid = "primary" if raw in ("primary", s["user"]["email"]) else raw
+        cid = ctx.actor if raw == "primary" else str(raw).lower()
         if cid not in s["calendars"]:
             out[raw] = {"errors": [{"domain": "global", "reason": "notFound"}], "busy": []}
             continue
+        owner = cid if s["calendars"][cid].get("person") else None
         blocks = [(_parse(e["start"], tz), _parse(e["end"], tz)) for e in s["events"].values()
-                  if e["calendarId"] == cid and e["status"] != "cancelled" and e.get("transparency") != "transparent"
-                  and _in_range(e, lo, hi, tz)
-                  and not any(a.get("self") and a["responseStatus"] == "declined" for a in e.get("attendees", []))]
+                  if _on_calendar(e, cid) and e.get("transparency") != "transparent" and _in_range(e, lo, hi, tz)
+                  and not any(a["email"] == (owner or e["organizer"]["email"]) and a["responseStatus"] == "declined"
+                              for a in e.get("attendees", []))]
         blocks += [(_parse(b["start"], tz), _parse(b["end"], tz)) for b in s["busy"].get(cid, [])]
         blocks = sorted((max(a, lo), min(b, hi)) for a, b in blocks if b > lo and a < hi)
         merged: list[list[dt.datetime]] = []

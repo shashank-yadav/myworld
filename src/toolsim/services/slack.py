@@ -95,6 +95,7 @@ class Slack(Service):
         state["bot_user"] = _new_user(ctx, state, {"name": bot["name"], "real_name": bot.get("real_name", bot["name"]),
                                                    "is_bot": True})["id"]
         state["_by_name"]["bot"] = state["bot_user"]
+        state["acting"] = state["bot_user"]  # who the current call acts as (see Service.actor_key)
         for u in seed.get("users", []):
             _new_user(ctx, state, u)
         base = int(ctx.now().timestamp()) - 3 * 86400
@@ -120,6 +121,17 @@ class Slack(Service):
                 for j, r in enumerate(m.get("replies", [])):
                     _add_reply(state, cid, msg, _msg(state, r["user"], r["text"], _ts(ctx, base + 3600 * (i + 1) + 60 * (j + 1))))
         return state
+
+    actor_key = "acting"  # agents act as the bot by default, or as any workspace member
+
+    def resolve_actor(self, state: dict[str, Any], identity: str) -> str:
+        q = identity.strip().lower().lstrip("@")
+        if q in ("bot", state["bot_user"].lower()):
+            return state["bot_user"]
+        for u in state["users"].values():
+            if q in (u["id"].lower(), u["name"].lower(), (u["profile"].get("email") or "").lower(), u["real_name"].lower()):
+                return u["id"]
+        raise ValueError(f"no Slack user {identity} in this workspace")
 
     def grading_view(self, state: dict[str, Any]) -> dict[str, Any]:
         """Messages annotated with channel name and author, so checks can say "posted in #api-oncall"."""
@@ -181,11 +193,11 @@ def _add_reply(state: dict[str, Any], cid: str, parent: dict[str, Any], reply: d
 def _channel(state: dict[str, Any], channel_id: str, *, need_member: bool = True) -> dict[str, Any]:
     ch = state["channels"].get(channel_id) or next(
         (c for c in state["channels"].values() if f"#{c['name']}" == channel_id or c["name"] == channel_id), None)
-    if ch is None or (ch["is_private"] and state["bot_user"] not in ch["members"]):
+    if ch is None or (ch["is_private"] and state["acting"] not in ch["members"]):
         raise _fail("channel_not_found")  # private channels are invisible to non-members
     if ch["is_archived"]:
         raise _fail("is_archived")
-    if need_member and state["bot_user"] not in ch["members"]:
+    if need_member and state["acting"] not in ch["members"]:
         raise _fail("not_in_channel")
     return ch
 
@@ -225,7 +237,7 @@ def slack_list_channels(ctx: Instance,
     """List public or pre-defined channels in the workspace with pagination"""
     s = ctx.state
     chans = [{k: v for k, v in c.items() if k != "members"} | {"num_members": len(c["members"]),
-                                                               "is_member": s["bot_user"] in c["members"]}
+                                                               "is_member": s["acting"] in c["members"]}
              for c in s["channels"].values() if not c["is_private"] and not c["is_archived"]]
     page, nxt = _page(chans, limit or 100, cursor)
     return {"ok": True, "channels": page, "response_metadata": {"next_cursor": nxt}}
@@ -239,7 +251,7 @@ def slack_post_message(ctx: Instance,
     s = ctx.state
     ch = _channel(s, channel_id)
     _check_text(text)
-    msg = _msg(s, s["bot_user"], text, _ts(ctx))
+    msg = _msg(s, s["acting"], text, _ts(ctx))
     s["messages"][ch["id"]].append(msg)
     return {"ok": True, "channel": ch["id"], "ts": msg["ts"], "message": msg}
 
@@ -258,7 +270,7 @@ def slack_reply_to_thread(ctx: Instance,
         raise _fail("thread_not_found")
     if parent.get("parent_user_id"):  # replying to a reply threads under the original parent
         parent = _find(s, ch["id"], parent["thread_ts"])
-    reply = _msg(s, s["bot_user"], text, _ts(ctx))
+    reply = _msg(s, s["acting"], text, _ts(ctx))
     _add_reply(s, ch["id"], parent, reply)
     return {"ok": True, "channel": ch["id"], "ts": reply["ts"], "message": reply}
 
@@ -276,12 +288,12 @@ def slack_add_reaction(ctx: Instance,
         raise _fail("invalid_name")
     msg = _find(s, ch["id"], timestamp)
     r = next((r for r in msg.setdefault("reactions", []) if r["name"] == name), None)
-    if r and s["bot_user"] in r["users"]:
+    if r and s["acting"] in r["users"]:
         raise _fail("already_reacted")
     if r is None:
         r = {"name": name, "users": [], "count": 0}
         msg["reactions"].append(r)
-    r["users"].append(s["bot_user"])
+    r["users"].append(s["acting"])
     r["count"] += 1
     return {"ok": True}
 

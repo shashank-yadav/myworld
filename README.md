@@ -1,7 +1,8 @@
 # toolsim
 
-Simulated replicas of the tools AI agents use (Gmail, Google Calendar, Slack, GitHub), for
-testing and training agents without touching the real systems.
+Simulated replicas of the tools AI agents use (Gmail, Google Calendar, Slack, GitHub, Jira,
+Google Drive, and Linear and Notion in preview), for testing and training agents, alone or
+several at once, without touching the real systems.
 
 Most of these tools have no test mode. toolsim gives every agent run its own copy of each
 tool: same MCP tool names and schemas as the popular real MCP servers, realistic state,
@@ -26,12 +27,53 @@ Environment  (task + subset of servers + seeds + faults + checks)      envs/*.ya
   Instances never share state.
 - **Environment:** a task that uses any subset of services, with seed data, faults and checks.
 
-| Service | Tools | Interface matches | Built-in traps |
-|---|---|---|---|
-| `gmail` | 19 | GongRzhe/Gmail-MCP-Server | Gmail search syntax, threads, system labels can't be deleted |
-| `calendar` | 11 | nspady/google-calendar-mcp | time zones, free/busy of others, read-only calendars (403), delete twice (410) |
-| `slack` | 8 | reference Slack MCP server | bot not in channel (`not_in_channel`), hidden private channels, duplicate reactions |
-| `github` | 26 | reference GitHub MCP server | real git blob SHAs, merge conflicts, required checks, duplicate PRs, missing `sha` on update |
+| Service | Tools | Interface matches | Fidelity | Built-in traps |
+|---|---|---|---|---|
+| `gmail` | 19 | GongRzhe/Gmail-MCP-Server | documented | Gmail search syntax, threads, system labels can't be deleted |
+| `calendar` | 11 | nspady/google-calendar-mcp | documented | time zones, read-only calendars (403), delete twice (410), invites and RSVPs |
+| `slack` | 8 | reference Slack MCP server | documented | `not_in_channel`, hidden private channels, duplicate reactions |
+| `github` | 26 | reference GitHub MCP server | documented | real git SHAs, merge conflicts, required checks, duplicate PRs |
+| `jira` | 16 | sooperset/mcp-atlassian | documented | workflow transitions, JQL, "status can't be set directly" |
+| `drive` | 12 | taylorwilsdon/google_workspace_mcp | documented | reader-only files, admin blocks external sharing, Drive query syntax |
+| `linear` | 23 | Linear hosted MCP | preview | team-scoped states and labels |
+| `notion` | 12 | Notion hosted MCP (core tools) | preview | restricted pages are invisible, strict status options |
+
+*documented*: tool names and parameters come from the real server's published reference.
+*preview*: tool names are real, but some parameters or response shapes are inferred.
+
+## Multiple agents
+
+Several agents can share one environment, each acting as a different person. Services are
+whole workspaces:
+- Gmail is the company mail system: mail between colleagues is delivered, filtered and threaded.
+- In Calendar, invites appear on attendees' calendars and RSVPs flow back to the organizer.
+- In Slack, GitHub, Jira, Linear, Notion and Drive, calls act with that person's identity and permissions.
+
+```yaml
+agents:
+  alex: {as: alex@acme.com, task: "Book 30 min with John next week about Q4."}
+  john: {as: john@acme.com, task: "Reply to scheduling emails; accept invites that fit."}
+checks:
+  - {name: John's agent accepted, server: calendar, calls: respond-to-event, agent: john, min: 1}
+```
+
+Each agent gets its own MCP URLs (`…/mcp?agent=john&as=john@acme.com`). Every call is attributed,
+and the whole environment shares one clock, so `GET /envs/{id}/calls` is a single timeline of who
+did what. See `envs/schedule-with-john.yaml`.
+
+## Snapshots and forks
+
+`POST /envs/{id}/snapshot`, `restore`, `fork` and `reset` work on the whole environment at once,
+atomically across every server. Fork a multi-agent run at any step and continue each branch
+independently. Single instances support the same operations.
+
+## Versions
+
+Each service has date-based versions (e.g. `gmail@2026-09-25`), and environments can pin one:
+`gmail: {version: 2026-09-25}`. Every released version is frozen in `src/toolsim/frozen/`: its
+exact tool definitions plus a hash of its behavior on a fixed probe script. The tests fail if the
+code changes what a released version does, so any change has to ship as a new dated version, with
+older dates kept working. `toolsim versions` shows the status, and `toolsim freeze` freezes new versions.
 
 ## Faults
 
@@ -76,8 +118,8 @@ checks:
 ```bash
 uv sync
 uv run toolsim services
-uv run toolsim serve --env envs/book-q4-meeting.yaml    # prints the MCP config to give your agent
-uv run toolsim grade envs/book-q4-meeting.yaml           # after the agent finishes
+uv run toolsim serve --env envs/schedule-with-john.yaml  # prints each agent's task and MCP config
+uv run toolsim grade envs/schedule-with-john.yaml        # after the agents finish
 ```
 
 Or run a single instance over stdio for agents configured with a command:

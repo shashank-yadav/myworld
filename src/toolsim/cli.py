@@ -75,29 +75,20 @@ def cmd_serve(args: argparse.Namespace) -> None:
     base = f"http://{args.host}:{args.port}"
     for path in args.env or []:
         env = Environment.load(path)
-        config: dict[str, Any] = {"mcpServers": {}}
-        for server in env.servers:
-            inst = host.create(env.service_for(server), env.seed_for(server), rng_seed=env.rng_seed,
-                               faults=env.faults_for(server), instance_id=f"{env.name}-{server}",
-                               version=env.version_for(server))
-            config["mcpServers"][server] = {"url": f"{base}/instances/{inst.id}/mcp"}
-        print(f"environment {env.name}: {', '.join(env.servers)}")
-        print(f"task: {env.task.strip()}")
-        print("MCP config for the agent:\n" + json.dumps(config, indent=2))
-    print(f"toolsim host on {base}  (control API: {base}/docs)")
+        run = host.start_env(env, env.name)
+        print(f"environment {env.name}: servers {', '.join(env.servers)}; agents {', '.join(env.agents)}")
+        for agent, cfg in run.agent_configs(base).items():
+            print(f"\n[{agent}] task: {cfg['task']}")
+            print(json.dumps({"mcpServers": cfg["mcpServers"]}, indent=2))
+        print(f"\ngrade with: toolsim grade {path} --url {base}   (snapshot/fork: {base}/docs)")
+    print(f"toolsim host on {base}  (control API: {base}/docs)", flush=True)
     uvicorn.run(create_app(host), host=args.host, port=args.port, log_level="warning")
 
 
 def cmd_grade(args: argparse.Namespace) -> None:
     from .env import Environment
     env = Environment.load(args.env)
-    worlds = {}
-    for server in env.servers:
-        iid = f"{args.prefix or env.name}-{server}"
-        state = json.load(urllib.request.urlopen(f"{args.url}/instances/{iid}/state"))["state"]
-        calls = json.load(urllib.request.urlopen(f"{args.url}/instances/{iid}/calls"))["calls"]
-        worlds[server] = {"state": state, "calls": calls}
-    report = env.grade(worlds)
+    report = json.load(urllib.request.urlopen(f"{args.url}/envs/{args.run or env.name}/grade"))
     if args.json:
         print(json.dumps(report, indent=2))
     else:
@@ -138,7 +129,7 @@ def main(argv: list[str] | None = None) -> None:
     s = sub.add_parser("grade", help="grade a run against an environment's checks")
     s.add_argument("env")
     s.add_argument("--url", default="http://127.0.0.1:8765")
-    s.add_argument("--prefix", help="instance id prefix (default: the environment name)")
+    s.add_argument("--run", help="environment run id (default: the environment name)")
     s.add_argument("--json", action="store_true")
     s.set_defaults(fn=cmd_grade)
 

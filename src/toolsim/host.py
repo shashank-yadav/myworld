@@ -2,6 +2,13 @@
 
 Agent-facing (per instance):
     POST /instances/{id}/mcp              MCP streamable HTTP endpoint (JSON responses)
+         ?agent=NAME&as=IDENTITY          which agent is calling, and which user it acts as
+
+Whole environments (several servers, several agents, one clock):
+    POST   /envs                          {spec | file, id?} -> per-agent MCP configs
+    POST   /envs/{id}/snapshot|restore|fork|reset   atomic across all servers
+    GET    /envs/{id}/calls               one timeline of every agent's calls
+    GET    /envs/{id}/grade               run the environment's checks
 
 Control plane (for test harnesses, RL loops and graders; agents never see it):
     GET    /services                      available services and their tools
@@ -28,6 +35,7 @@ from fastapi.responses import JSONResponse
 
 from .core import mcp
 from .core.instance import Instance
+from .env import Environment, EnvRun
 from .services import SERVICES, get_service
 
 
@@ -35,7 +43,28 @@ class Host:
     def __init__(self) -> None:
         self.instances: dict[str, Instance] = {}
         self.snapshots: dict[str, dict[str, Any]] = {}
+        self.envs: dict[str, EnvRun] = {}
+        self.env_snapshots: dict[str, dict[str, Any]] = {}
         self._lock = threading.Lock()
+
+    def start_env(self, env: Environment, run_id: str | None = None) -> EnvRun:
+        run = EnvRun(env, run_id or f"{env.name}-{uuid.uuid4().hex[:6]}")
+        return self._register(run)
+
+    def _register(self, run: EnvRun) -> EnvRun:
+        with self._lock:
+            if run.id in self.envs or any(i.id in self.instances for i in run.instances.values()):
+                raise ValueError(f"environment run {run.id} already exists")
+            self.envs[run.id] = run
+            for inst in run.instances.values():
+                self.instances[inst.id] = inst
+        return run
+
+    def delete_env(self, run_id: str) -> None:
+        with self._lock:
+            run = self.envs.pop(run_id)
+            for inst in run.instances.values():
+                self.instances.pop(inst.id, None)
 
     def create(self, service: str, seed: dict[str, Any] | None = None, *, rng_seed: int = 0,
                faults: list[dict[str, Any]] | None = None, instance_id: str | None = None,
@@ -80,7 +109,16 @@ def create_app(host: Host | None = None) -> FastAPI:
         except ValueError:
             return JSONResponse({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "Parse error"}},
                                 status_code=400)
-        resp = mcp.handle(i, msg)
+        # multi-agent: ?agent=john&as=john@acme.com (or X-Toolsim-Agent / X-Toolsim-As headers)
+        agent = request.query_params.get("agent") or request.headers.get("x-toolsim-agent")
+        as_ = request.query_params.get("as") or request.headers.get("x-toolsim-as")
+        if as_:
+            try:
+                i.resolve_actor(as_)
+            except ValueError as e:
+                return JSONResponse({"jsonrpc": "2.0", "id": msg.get("id") if isinstance(msg, dict) else None,
+                                     "error": {"code": -32001, "message": str(e)}}, status_code=403)
+        resp = mcp.handle(i, msg, agent=agent, as_=as_)
         if resp is None:
             return Response(status_code=202)
         headers = {}
@@ -99,6 +137,87 @@ def create_app(host: Host | None = None) -> FastAPI:
         return Response(status_code=200)
 
     # -- control plane -------------------------------------------------------------------
+
+    # -- whole environments (multi-agent) --------------------------------------------------
+
+    def env_run(run_id: str) -> EnvRun:
+        run = host.envs.get(run_id)
+        if run is None:
+            raise HTTPException(404, f"no environment run {run_id}")
+        return run
+
+    def describe_env(request: Request, run: EnvRun) -> dict[str, Any]:
+        base = str(request.base_url).rstrip("/")
+        return {"id": run.id, "environment": run.env.name, "now": run.clock.now.isoformat(), "calls": run.clock.seq,
+                "servers": {s: {"instance": i.id, "service": i.service.name, "version": i.version}
+                            for s, i in run.instances.items()},
+                "agents": run.agent_configs(base)}
+
+    @app.post("/envs")
+    def start_env(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """{"spec": {...environment...}} or {"file": "envs/x.yaml"}; optional "id"."""
+        try:
+            env = Environment.load(body["file"]) if body.get("file") else Environment.from_dict(body["spec"])
+            run = host.start_env(env, body.get("id"))
+        except (KeyError, ValueError, OSError) as e:
+            raise HTTPException(400, str(e)) from None
+        return describe_env(request, run)
+
+    @app.get("/envs")
+    def list_envs(request: Request) -> dict[str, Any]:
+        return {"envs": [describe_env(request, r) for r in host.envs.values()]}
+
+    @app.get("/envs/{run_id}")
+    def get_env(request: Request, run_id: str) -> dict[str, Any]:
+        return describe_env(request, env_run(run_id))
+
+    @app.delete("/envs/{run_id}")
+    def delete_env(run_id: str) -> dict[str, Any]:
+        env_run(run_id)
+        host.delete_env(run_id)
+        return {"deleted": run_id}
+
+    @app.post("/envs/{run_id}/snapshot")
+    def env_snapshot(run_id: str) -> dict[str, Any]:
+        """Atomic across every server in the environment."""
+        sid = f"envsnap-{uuid.uuid4().hex[:10]}"
+        host.env_snapshots[sid] = {"env": run_id, "data": env_run(run_id).snapshot()}
+        return {"snapshot_id": sid}
+
+    @app.post("/envs/{run_id}/restore")
+    def env_restore(run_id: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        snap = host.env_snapshots.get(body.get("snapshot_id", ""))
+        run = env_run(run_id)
+        if snap is None:
+            raise HTTPException(404, "no such snapshot")
+        if host.envs.get(snap["env"]) is not None and host.envs[snap["env"]].env.name != run.env.name:
+            raise HTTPException(400, "snapshot belongs to a different environment")
+        run.restore(snap["data"])
+        return {"restored": run_id}
+
+    @app.post("/envs/{run_id}/fork")
+    def env_fork(request: Request, run_id: str, body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        """An independent copy of the whole world at this instant, with its own agent URLs."""
+        src = env_run(run_id)
+        try:
+            run = host._register(src.fork((body or {}).get("id") or f"{src.env.name}-{uuid.uuid4().hex[:6]}"))
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from None
+        return describe_env(request, run)
+
+    @app.post("/envs/{run_id}/reset")
+    def env_reset(run_id: str) -> dict[str, Any]:
+        env_run(run_id).reset()
+        return {"reset": run_id}
+
+    @app.get("/envs/{run_id}/calls")
+    def env_calls(run_id: str) -> dict[str, Any]:
+        """One timeline: every agent's calls across every server, in order."""
+        return {"calls": env_run(run_id).calls()}
+
+    @app.get("/envs/{run_id}/grade")
+    def env_grade(run_id: str) -> dict[str, Any]:
+        return env_run(run_id).grade()
 
     @app.get("/services")
     def services() -> dict[str, Any]:

@@ -44,7 +44,7 @@ class Run:
 
 def test_all_example_envs_load():
     names = {Environment.load(p).name for p in ENVS.glob("*.yaml")}
-    assert names == {"book-q4-meeting", "triage-and-announce", "merge-when-green"}
+    assert names == {"book-q4-meeting", "triage-and-announce", "merge-when-green", "schedule-with-john"}
 
 
 # -- book-q4-meeting ------------------------------------------------------------------------

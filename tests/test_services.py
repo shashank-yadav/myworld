@@ -25,14 +25,14 @@ def test_gmail_search_syntax():
 
 def test_gmail_labels_threads_and_errors():
     i, call = svc("gmail")
-    q4 = next(m for m in i.state["messages"].values() if m["subject"] == "Q4 planning")
+    q4 = next(m for m in i.state["mailboxes"]["alex@acme.com"]["messages"].values() if m["subject"] == "Q4 planning")
     assert "Thread ID" in call("read_email", messageId=q4["id"]).text
     assert call("read_email", messageId="nope").text == "Error: Requested entity was not found."
     assert call("modify_email", messageId=q4["id"], removeLabelIds=["UNREAD"]).is_error is False
-    assert "UNREAD" not in i.state["messages"][q4["id"]]["labelIds"]
+    assert "UNREAD" not in i.state["mailboxes"]["alex@acme.com"]["messages"][q4["id"]]["labelIds"]
     assert call("modify_email", messageId=q4["id"], addLabelIds=["Label_999"]).is_error
     r = call("send_email", to=["john@acme.com"], subject="Re: Q4 planning", body="Tue?", threadId=q4["threadId"])
-    reply = i.state["messages"][r.text.rsplit(" ", 1)[-1]]
+    reply = i.state["mailboxes"]["alex@acme.com"]["messages"][r.text.rsplit(" ", 1)[-1]]
     assert reply["threadId"] == q4["threadId"] and reply["labelIds"] == ["SENT"]
     assert call("send_email", to=["not-an-address"], subject="x", body="y").is_error
     assert call("create_label", name="Clients").is_error  # already exists
@@ -42,10 +42,10 @@ def test_gmail_labels_threads_and_errors():
 
 def test_gmail_attachment_download_is_simulated():
     i, call = svc("gmail")
-    m = next(m for m in i.state["messages"].values() if m["attachments"])
+    m = next(m for m in i.state["mailboxes"]["alex@acme.com"]["messages"].values() if m["attachments"])
     r = call("download_attachment", messageId=m["id"], attachmentId=m["attachments"][0]["attachmentId"], savePath="/tmp/x")
     assert "Saved to: /tmp/x/receipt-1847-2213.pdf" in r.text
-    assert i.state["downloads"][0]["path"] == "/tmp/x/receipt-1847-2213.pdf"
+    assert i.state["mailboxes"]["alex@acme.com"]["downloads"][0]["path"] == "/tmp/x/receipt-1847-2213.pdf"
 
 
 # -- calendar -----------------------------------------------------------------------------

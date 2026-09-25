@@ -36,7 +36,7 @@ def test_instances_are_deterministic_and_isolated():
     assert a.call("send_email", args).text == b.call("send_email", args).text  # same seed, same ids
     assert a.now() == b.now()
     a.call("send_email", args)
-    assert len(a.state["messages"]) == len(b.state["messages"]) + 1  # no shared state
+    assert len(a.state["mailboxes"]["alex@acme.com"]["messages"]) == len(b.state["mailboxes"]["alex@acme.com"]["messages"]) + 1  # no shared state
 
 
 def test_snapshot_restore_and_reset():
@@ -54,7 +54,7 @@ def test_snapshot_restore_and_reset():
 def test_failed_calls_leave_no_partial_writes():
     i = Instance(get_service("gmail"))
     before = json.dumps(i.state, sort_keys=True, default=str)
-    r = i.call("batch_modify_emails", {"messageIds": list(i.state["messages"])[:1], "addLabelIds": ["NOPE"]})
+    r = i.call("batch_modify_emails", {"messageIds": list(i.state["mailboxes"]["alex@acme.com"]["messages"])[:1], "addLabelIds": ["NOPE"]})
     assert r.is_error
     assert json.dumps(i.state, sort_keys=True, default=str) == before
 
@@ -64,7 +64,7 @@ def test_timeout_after_commit_really_commits():
     args = {"to": ["john@acme.com"], "subject": "Q4", "body": "Tue 10am"}
     r = i.call("send_email", args)
     assert r.is_error and "timed out" in r.text
-    sent = [m for m in i.state["messages"].values() if "SENT" in m["labelIds"] and m["subject"] == "Q4"]
+    sent = [m for m in i.state["mailboxes"]["alex@acme.com"]["messages"].values() if "SENT" in m["labelIds"] and m["subject"] == "Q4"]
     assert len(sent) == 1, "the email went out even though the caller saw a timeout"
     assert i.calls[-1]["committed"] and i.calls[-1]["fault"] == "timeout_after_commit"
     assert not i.call("send_email", args).is_error  # the fault fired once; a retry duplicates
@@ -72,9 +72,9 @@ def test_timeout_after_commit_really_commits():
 
 def test_timeout_before_commit_does_nothing():
     i = Instance(get_service("gmail"), faults=[{"tool": "send_*", "kind": "timeout"}])
-    n = len(i.state["messages"])
+    n = len(i.state["mailboxes"]["alex@acme.com"]["messages"])
     assert i.call("send_email", {"to": ["a@b.co"], "subject": "s", "body": "b"}).is_error
-    assert len(i.state["messages"]) == n and not i.calls[-1]["committed"]
+    assert len(i.state["mailboxes"]["alex@acme.com"]["messages"]) == n and not i.calls[-1]["committed"]
 
 
 def test_probabilistic_faults_are_seeded():

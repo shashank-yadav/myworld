@@ -52,7 +52,7 @@ def test_host_runs_isolated_instances_with_control_plane():
     send = {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
             "params": {"name": "send_email", "arguments": {"to": ["x@y.co"], "subject": "hi", "body": "b"}}}
     assert "sent successfully" in c.post("/instances/a/mcp", json=send).json()["result"]["content"][0]["text"]
-    sent = lambda iid: sum("SENT" in m["labelIds"] for m in c.get(f"/instances/{iid}/state").json()["state"]["messages"].values())  # noqa: E731
+    sent = lambda iid: sum("SENT" in m["labelIds"] for m in c.get(f"/instances/{iid}/state").json()["state"]["mailboxes"]["alex@acme.com"]["messages"].values())  # noqa: E731
     assert sent("a") == sent("b") + 1, "instances never share state"
     assert c.get("/instances/a/calls").json()["calls"][0]["tool"] == "send_email"
     assert a["mcp_url"].endswith("/instances/a/mcp")

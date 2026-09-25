@@ -126,6 +126,8 @@ class GitHub(Service):
         state: dict[str, Any] = {"viewer": seed.get("viewer", "alex-rivera"), "users": {}, "repos": {}, "blobs": {}}
         for u in seed.get("users", []):
             _user(ctx, state, u["login"], u.get("name"), u.get("type", "User"))
+            if u.get("email"):
+                state["users"][u["login"]]["email"] = u["email"]
         _user(ctx, state, state["viewer"])
         for r in seed.get("repos", []):
             owner, name = r["name"].split("/", 1)
@@ -157,6 +159,15 @@ class GitHub(Service):
                 _new_pull(ctx, state, repo, p["title"], p.get("body"), p["head"], p["base"], p.get("author", state["viewer"]),
                           p.get("draft", False))
         return state
+
+    actor_key = "viewer"
+
+    def resolve_actor(self, state: dict[str, Any], identity: str) -> str:
+        q = identity.strip().lower()
+        for u in state["users"].values():
+            if u["type"] == "User" and q in (u["login"].lower(), (u.get("email") or "").lower(), u["name"].lower()):
+                return u["login"]
+        raise ValueError(f"no GitHub user {identity} in this environment")
 
     def fault_error(self, fault: Any) -> tuple[Any, int]:
         if fault.kind == "rate_limit":

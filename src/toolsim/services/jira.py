@@ -125,6 +125,14 @@ class Jira(Service):
                 keys.append(issue["key"])
         return state
 
+    actor_key = "me"
+
+    def resolve_actor(self, state: dict[str, Any], identity: str) -> str:
+        try:
+            return _resolve_user(state, identity)  # account id, email or display name
+        except ToolError:
+            raise ValueError(f"no Jira user {identity} on this site") from None
+
     def fault_error(self, fault: Any) -> tuple[Any, int]:
         if fault.kind == "rate_limit":
             return {"errorMessages": ["Rate limit exceeded."], "errors": {}, "retryAfter": fault.retry_after}, 429

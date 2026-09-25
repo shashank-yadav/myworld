@@ -135,6 +135,15 @@ class Notion(Service):
                 _new_row(ctx, state, ds, row)
         return state
 
+    actor_key = "me"
+
+    def resolve_actor(self, state: dict[str, Any], identity: str) -> str:
+        q = identity.strip().lower()
+        for u in state["users"].values():
+            if q in (u["id"], u["email"].lower(), u["name"].lower()):
+                return u["id"]
+        raise ValueError(f"no Notion user {identity} in this workspace")
+
     def fault_error(self, fault: Any) -> tuple[Any, int]:
         if fault.kind == "rate_limit":
             return {"object": "error", "status": 429, "code": "rate_limited",

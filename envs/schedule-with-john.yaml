@@ -1,0 +1,50 @@
+name: schedule-with-john
+description: >
+  Two agents, two people. Alex's agent proposes a meeting by email and sends the invite once
+  John agrees; John's agent reads the proposal, checks his own calendar, replies, and accepts.
+  Mail and invites really travel between their mailboxes and calendars.
+servers:
+  gmail:
+    extend:
+      mailboxes: [{user: {email: john@acme.com, name: John Park}}]
+  calendar:
+    extend:
+      people: [{email: john@acme.com, name: John Park}]
+agents:
+  alex:
+    as: alex@acme.com
+    task: >
+      Find 30 minutes with John Park on Tuesday or Wednesday next week for Q4 planning. Email him
+      to propose a time. Once he agrees, create the event with him as an attendee.
+  john:
+    as: john@acme.com
+    task: >
+      When someone emails you proposing a meeting time, check your calendar. If you're free,
+      reply to agree. Accept calendar invites that don't conflict with anything.
+checks:
+  - name: one Q4 event that John accepted
+    server: calendar
+    state: events
+    where: {status: confirmed, summary~: q4, attendees: {email: john@acme.com, responseStatus: accepted}}
+    count: 1
+  - name: John received Alex's proposal
+    server: gmail
+    state: "mailboxes[john@acme.com].messages"
+    where: {from~: alex@acme.com, labelIds: [INBOX]}
+    min: 1
+  - name: Alex received John's reply
+    server: gmail
+    state: "mailboxes[alex@acme.com].messages"
+    where: {from~: john@acme.com, labelIds: [INBOX]}
+    min: 1
+  - name: John's agent accepted the invite itself
+    server: calendar
+    calls: respond-to-event
+    agent: john
+    ok: true
+    min: 1
+  - name: only Alex's agent created events
+    server: calendar
+    calls: create-event
+    agent: john
+    count: 0

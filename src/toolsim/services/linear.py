@@ -142,6 +142,14 @@ class Linear(Service):
                                        "createdAt": _iso(ctx), "updatedAt": _iso(ctx)}
         return state
 
+    actor_key = "viewer"
+
+    def resolve_actor(self, state: dict[str, Any], identity: str) -> str:
+        try:
+            return _find_user(state, identity)["id"]
+        except ToolError:
+            raise ValueError(f"no Linear user {identity} in this workspace") from None
+
     def fault_error(self, fault: Any) -> tuple[Any, int]:
         if fault.kind == "rate_limit":
             return {"error": "Rate limit exceeded. Please retry after the reset time.", "type": "Ratelimited",

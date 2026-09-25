@@ -17,10 +17,11 @@ from .instance import Instance
 SUPPORTED_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"]
 
 
-def handle(instance: Instance, msg: Any) -> Any:
-    """Handle one JSON-RPC message (or a batch). Returns the response, or None for notifications."""
+def handle(instance: Instance, msg: Any, *, agent: str | None = None, as_: str | None = None) -> Any:
+    """Handle one JSON-RPC message (or a batch). Returns the response, or None for notifications.
+    ``agent``/``as_`` identify the connected agent and who it acts as (multi-agent environments)."""
     if isinstance(msg, list):
-        out = [r for r in (handle(instance, m) for m in msg) if r is not None]
+        out = [r for r in (handle(instance, m, agent=agent, as_=as_) for m in msg) if r is not None]
         return out or None
     if not isinstance(msg, dict) or msg.get("jsonrpc") != "2.0":
         return _error(None, -32600, "Invalid Request")
@@ -45,7 +46,7 @@ def handle(instance: Instance, msg: Any) -> Any:
             name = params.get("name")
             if name not in instance.tools:
                 return _error(mid, -32602, f"Unknown tool: {name}")
-            r = instance.call(name, params.get("arguments") or {})
+            r = instance.call(name, params.get("arguments") or {}, agent=agent, as_=as_)
             return _ok(mid, {"content": [{"type": "text", "text": r.text}], "isError": r.is_error})
         if method in ("resources/list", "resources/templates/list"):
             return _ok(mid, {"resources": [], "resourceTemplates": []})
@@ -64,8 +65,9 @@ def _error(mid: Any, code: int, message: str) -> dict[str, Any]:
     return {"jsonrpc": "2.0", "id": mid, "error": {"code": code, "message": message}}
 
 
-def serve_stdio(instance: Instance, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout) -> None:
-    """For agents configured with a command (``command: toolsim, args: [serve, gmail, --stdio]``)."""
+def serve_stdio(instance: Instance, stdin: TextIO = sys.stdin, stdout: TextIO = sys.stdout, *,
+                agent: str | None = None, as_: str | None = None) -> None:
+    """For agents configured with a command (``command: toolsim, args: [stdio, gmail]``)."""
     for line in stdin:
         line = line.strip()
         if not line:
@@ -75,7 +77,7 @@ def serve_stdio(instance: Instance, stdin: TextIO = sys.stdin, stdout: TextIO = 
         except ValueError:
             resp: Any = _error(None, -32700, "Parse error")
         else:
-            resp = handle(instance, msg)
+            resp = handle(instance, msg, agent=agent, as_=as_)
         if resp is not None:
             stdout.write(json.dumps(resp) + "\n")
             stdout.flush()
