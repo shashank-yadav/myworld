@@ -32,6 +32,14 @@ env.trajectory()                              # steps, world events, answer, per
   and background activity (see below). The same seed and the same actions give the same rollout.
 - **Branching:** `fork()` and `snapshot()`/`restore()` copy an episode mid-way, for tree search
   or many rollouts from one hard state.
+- **Tasks at scale:** `toolsim tasks -n 5000 --out tasks.jsonl` (or `toolsim.tasks.generate`) writes
+  validated tasks from 12 families across all six tools and across tools (reply to a colleague,
+  archive one sender and nothing else, book a slot you're both free for, label every matching
+  issue while keeping existing labels, merge only if green, reassign someone's open work, share the
+  current file and not its old copy, file a bug from the latest escalation email, ...). Each task
+  is written from what's actually in its seeded world, with verifiers, `must` constraints for
+  collateral damage, and a reference solution. Every task is checked before it's kept: the
+  reference solution scores 1.0 and doing nothing scores less. `--hard` adds flaky APIs.
 - **Over HTTP** (remote trainers, MCP-native agents): `POST /envs {file|spec, seed}` returns MCP
   URLs, the agent works through MCP, and `POST /envs/{id}/submit {answer}` returns the reward.
 

@@ -46,7 +46,8 @@ Checks look at the final **state** (what's true in the world), at the **calls** 
 
 ``answer`` takes ``contains`` (text, or a value looked up in the final state) or ``matches`` (a regex). ``where`` matchers: plain values match exactly (lists: "contains all"), a key
 ending in ``~`` matches a case-insensitive substring, dotted keys reach into nested objects and
-lists. Bounds: ``count``, ``min``, ``max``.
+lists; ``!key`` negates a matcher and ``key~re`` matches a regular expression. Bounds: ``count``,
+``min``, ``max``.
 """
 
 from __future__ import annotations
@@ -374,6 +375,16 @@ def _norm(v: Any) -> Any:
 
 def _match(obj: Any, where: dict[str, Any]) -> bool:
     for key, want in where.items():
+        if key.startswith("!"):  # must NOT match
+            if _match(obj, {key[1:]: want}):
+                return False
+            continue
+        if key.endswith("~re"):  # regular expression, case-insensitive
+            vals = _values(obj, key[:-3])
+            flat = [x for v in vals for x in (v if isinstance(v, list) else [v])]
+            if not any(isinstance(x, str) and re.search(str(want), x, re.I) for x in flat):
+                return False
+            continue
         substring = key.endswith("~")
         vals = _values(obj, key.rstrip("~"))
         flat = [x for v in vals for x in (v if isinstance(v, list) else [v])]

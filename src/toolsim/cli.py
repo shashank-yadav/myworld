@@ -73,6 +73,31 @@ def cmd_issues(args: argparse.Namespace) -> None:
         print(f"  {name:9} {', '.join(a.name for a in cls.actions)}")
 
 
+def cmd_tasks(args: argparse.Namespace) -> None:
+    import json
+    import sys
+
+    from . import tasks
+    if args.list:
+        for name, (fn, servers) in sorted(tasks.FAMILIES.items()):
+            print(f"{name:24} {', '.join(servers):14} {(fn.__doc__ or '').strip()}")
+        return
+    families = args.families.split(",") if args.families else None
+    specs = tasks.generate(args.n, seed=args.seed, families=families, hard=args.hard)
+    out = open(args.out, "w") if args.out else sys.stdout  # noqa: SIM115
+    try:
+        for spec in specs:
+            out.write(json.dumps(spec) + "\n")
+    finally:
+        if args.out:
+            out.close()
+            counts: dict[str, int] = {}
+            for spec in specs:
+                counts[spec["family"]] = counts.get(spec["family"], 0) + 1
+            print(f"wrote {len(specs)} validated tasks to {args.out}: "
+                  + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())), file=sys.stderr)
+
+
 def cmd_import(args: argparse.Namespace) -> None:
     import datetime as dt
 
@@ -206,6 +231,15 @@ def main(argv: list[str] | None = None) -> None:
 
     s = sub.add_parser("issues", help="list the issue library and world actions")
     s.set_defaults(fn=cmd_issues)
+
+    s = sub.add_parser("tasks", help="generate validated RL tasks (JSONL environment specs)")
+    s.add_argument("-n", type=int, default=100, help="how many tasks (default 100)")
+    s.add_argument("--seed", type=int, default=0, help="base seed; each task gets its own world seed")
+    s.add_argument("--families", help="comma-separated task families (default: all; see --list)")
+    s.add_argument("--hard", action="store_true", help="add flaky APIs to every task")
+    s.add_argument("--out", help="output file (default: stdout)")
+    s.add_argument("--list", action="store_true", help="list task families")
+    s.set_defaults(fn=cmd_tasks)
 
     s = sub.add_parser("versions", help="list service versions and whether each still matches its frozen fingerprint")
     s.set_defaults(fn=cmd_versions)

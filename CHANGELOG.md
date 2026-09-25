@@ -17,6 +17,9 @@ Realism gaps closed as new service versions (`2026-09-25.1`; the `2026-09-25` ve
 - **Jira:** 6 agile tools (boards, sprints, sprint issues, create/update sprint), `sprint` in JQL with
   `openSprints()` / `closedSprints()` / `futureSprints()`, Jira's sprint rules.
 - **Drive:** Sheets (cells, A1 ranges, USER_ENTERED vs RAW, formulas, grid limits) and Docs tools.
+- **Task generator** (`toolsim.tasks`, `toolsim tasks`): 12 families, each producing tasks from the seeded
+  world with verifiers, `must` constraints and a reference solution; every task is validated (reference 1.0,
+  do-nothing below). Checks gain `!key` (negation) and `key~re` (regex). Calendar grading is ~30x faster.
 - **Eventually consistent search** (`2026-09-25.2` for GitHub, Jira, Drive; Notion `2026-09-25.1`): search
   indexes lag behind writes (new items missing, edits stale, deletes lingering) while get/list stay immediate.
   Configurable per seed with `search_lag`.

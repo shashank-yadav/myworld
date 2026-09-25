@@ -35,6 +35,7 @@ from ..core.tools import ToolError, action, tool
 
 V1 = "2026-09-25.1"
 MAX_INSTANCES = 730  # a recurring series is expanded at most this far
+GRADING_DAYS = 180  # graders look for conflicts this far into a recurring series
 POLICIES = ("accept", "decline", "tentative", "if_free")
 
 COLORS = {str(i): c for i, c in enumerate(
@@ -163,16 +164,32 @@ class Calendar(Service):
         event (any instance of it, for a recurring series) overlaps something else they're busy
         with (accepted events or free/busy blocks)."""
         tz = state["timeZone"]
+        expanded: dict[str, list[tuple[dt.datetime, dt.datetime, dict[str, Any]]]] = {}
+        busy: dict[str, list[tuple[dt.datetime, dt.datetime, str | None]]] = {}
+        for e in state["events"].values():  # expand each event once (a series up to GRADING_DAYS ahead)
+            if e["status"] == "cancelled":
+                continue
+            start = _parse(e["start"], tz)
+            spans = [(_parse(i["start"], tz), _parse(i["end"], tz), i)
+                     for i in _occurrences(state, e, None, start + dt.timedelta(days=GRADING_DAYS), tz)]
+            expanded[e["id"]] = spans
+            if e.get("transparency") == "transparent":
+                continue
+            for a, b, inst in spans:
+                for p in {inst["calendarId"], *[x["email"] for x in inst.get("attendees", [])]}:
+                    if _on_calendar(inst, p) and not any(x["email"] == p and x["responseStatus"] == "declined"
+                                                         for x in inst.get("attendees", [])):
+                        busy.setdefault(p, []).append((a, b, e["id"]))
+        for p, blocks in state["busy"].items():
+            busy.setdefault(p, []).extend((_parse(x["start"], tz), _parse(x["end"], tz), None) for x in blocks)
         events = []
         for e in state["events"].values():
             conflicts: set[str] = set()
-            if e["status"] != "cancelled":
-                for inst in _occurrences(state, e, None, None, tz):
-                    s, en = _parse(inst["start"], tz), _parse(inst["end"], tz)
-                    people = {inst["calendarId"], *[a["email"] for a in inst.get("attendees", [])
-                                                    if a["responseStatus"] != "declined"]}
-                    conflicts |= {p for p in people if _on_calendar(inst, p)
-                                  and any(a < en and s < b for a, b in _busy_spans(state, p, e["id"], s, en, tz))}
+            for s0, en, inst in expanded.get(e["id"], []):
+                people = {inst["calendarId"], *[a["email"] for a in inst.get("attendees", [])
+                                                if a["responseStatus"] != "declined"]}
+                conflicts |= {p for p in people if _on_calendar(inst, p)
+                              and any(a < en and s0 < b and eid != e["id"] for a, b, eid in busy.get(p, []))}
             events.append({**e, "booked_by_agent": bool(e.get("_by_agent")), "conflicts_for": sorted(conflicts)})
         return {**state, "events": events}
 

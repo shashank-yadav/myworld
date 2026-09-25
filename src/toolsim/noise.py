@@ -159,7 +159,8 @@ def _mail(rng: random.Random, domain: str, org: str, colleagues: list[dict[str, 
                 "body": "We noticed a new sign-in to your account. If this was you, you don't need to do anything."}
     if kind == "cold":
         ext = _pick(rng, ["growthly.io", "scalebright.com", "talentpeak.co", "dataflux.ai"])
-        return {"from": f"{_pick(rng, FIRST)} {_pick(rng, LAST)} <hello@{ext}>", "labels": [],
+        first, last = _pick(rng, FIRST), _pick(rng, LAST)
+        return {"from": f"{first} {last} <{first.lower()}@{ext}>", "labels": [],
                 "subject": _pick(rng, ["Quick question", "Partnership opportunity", f"Exciting {_pick(rng, TITLES)} role",
                                        "15 minutes next week?", "Re: following up"]),
                 "body": "Hope you're well! I'll keep this short: we help teams like yours cut costs by 30%. "
