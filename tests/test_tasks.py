@@ -5,7 +5,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from toolsim import tasks
+from toolsim.rl import tasks
 from toolsim.host import HostConfig, create_app
 from toolsim.rl import ToolEnv
 
@@ -92,7 +92,8 @@ def test_double_booking_and_wrong_escalation_are_caught():
     st = env.run.instances["calendar"].state
     date = ref["start"][:10]
     who = ref["attendees"][0]["email"]
-    from toolsim.services.calendar import _busy_spans, _parse
+    from toolsim.services.calendar.model import _parse
+    from toolsim.services.calendar.recurrence import _busy_spans
     import datetime as dt
     day = _parse(date + "T09:00:00", st["timeZone"])
     spans = _busy_spans(st, "alex@acme.com", "", day, day + dt.timedelta(hours=8), st["timeZone"])

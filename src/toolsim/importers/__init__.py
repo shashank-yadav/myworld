@@ -7,7 +7,8 @@
     toolsim import jira    ~/Downloads/jira-export.csv         -o seeds/jira.yaml
     toolsim import drive   ~/Takeout/Drive                     -o seeds/drive.yaml
 
-Every importer produces the seed format of its service, so the result drops straight into an
+The importers live with their services (``services/<tool>/importer.py``); this package holds the
+registry and the shared options. Every importer produces the seed format of its service, so the result drops straight into an
 environment (``servers: {gmail: {seed_file: seeds/gmail.yaml}}``). Common options: pseudonymize
 people consistently across imports (``--anonymize --map people.json``), scrub emails and phone
 numbers inside text, shift time so the newest item lands at the environment's "now", and cap size.
@@ -17,8 +18,13 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from . import calendar, drive, github, gmail, jira, slack
-from .common import ImportOptions
+from .common import ImportOptions  # noqa: I001  (before the importers, which use it)
+from ..services.calendar.importer import import_ics
+from ..services.drive.importer import import_folder
+from ..services.github.importer import import_repo
+from ..services.gmail.importer import import_mbox
+from ..services.jira.importer import import_export as import_jira
+from ..services.slack.importer import import_export as import_slack
 
 def _checked(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]:
     """Fail with a clear message on a missing path, and never create files at the source path."""
@@ -32,12 +38,12 @@ def _checked(fn: Callable[..., dict[str, Any]]) -> Callable[..., dict[str, Any]]
 
 
 IMPORTERS: dict[str, Callable[..., dict[str, Any]]] = {name: _checked(fn) for name, fn in {
-    "gmail": gmail.import_mbox,
-    "calendar": calendar.import_ics,
-    "slack": slack.import_export,
-    "github": github.import_repo,
-    "jira": jira.import_export,
-    "drive": drive.import_folder,
+    "gmail": import_mbox,
+    "calendar": import_ics,
+    "slack": import_slack,
+    "github": import_repo,
+    "jira": import_jira,
+    "drive": import_folder,
 }.items()}
 
 __all__ = ["IMPORTERS", "ImportOptions"]

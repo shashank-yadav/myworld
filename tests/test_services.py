@@ -116,7 +116,7 @@ O = {"owner": "acme", "repo": "api"}
 
 
 def test_github_files_and_blob_shas():
-    from toolsim.services.github import blob_sha
+    from toolsim.services.github.model import blob_sha
     i, call = svc("github")
     f = json.loads(call("get_file_contents", path="README.md", **O).text)
     assert f["sha"] == blob_sha("# Acme API\n\nPayments and billing API.\n")

@@ -77,7 +77,7 @@ def cmd_tasks(args: argparse.Namespace) -> None:
     import json
     import sys
 
-    from . import tasks
+    from .rl import tasks
     if args.list:
         for name, (fn, servers) in sorted(tasks.FAMILIES.items()):
             print(f"{name:24} {', '.join(servers):14} {(fn.__doc__ or '').strip()}")
