@@ -488,3 +488,96 @@ def test_search_lag_survives_snapshots_and_is_configurable():
     fast = Instance(svc, {**svc.default_seed(), "search_lag": {"issues": 0}}, version=V2)
     fast.call("create_issue", {**O, "title": "Flaky login"})
     assert _json(fast.call("search_issues", {"q": "flaky login"}))["total_count"] == 1
+
+
+# -- linear -------------------------------------------------------------------------------
+
+def linear(version=V1):
+    return Instance(get_service("linear"), version=version)
+
+
+def test_linear_cycles_estimates_label_groups():
+    li = linear()
+    made = _json(li.call("create_issue", {"title": "Refund webhooks", "team": "ENG", "cycle": "current", "estimate": 3}))
+    assert made["cycle"]["number"] == 2 and made["estimate"] == 3
+    assert "must be one of 1, 2, 3, 5, 8" in li.call("create_issue", {"title": "x", "team": "ENG", "estimate": 4}).text
+    assert "not enabled for team OPS" in li.call("create_issue", {"title": "x", "team": "OPS", "estimate": 1}).text
+    assert not li.call("update_issue", {"id": "ENG-2", "labels": ["Bug", "Tech debt"]}).is_error
+    assert "both in the 'Type' group" in li.call("update_issue", {"id": "ENG-2", "labels": ["Bug", "Feature"]}).text
+    assert "label group" in li.call("update_issue", {"id": "ENG-2", "labels": ["Type"]}).text
+    assert "is completed" in li.call("update_issue", {"id": "ENG-2", "cycle": "1"}).text
+    _json(li.call("update_issue", {"id": "ENG-2", "cycle": "next"}))
+    current = {i["identifier"] for i in _json(li.call("list_issues", {"cycle": "current"}))["issues"]}
+    assert current == {"ENG-1", made["identifier"]}
+    assert not linear(V0).call("create_issue", {"title": "x", "team": "OPS", "estimate": 7}).is_error, "old version"
+
+
+def test_linear_cursor_pagination_walks_everything():
+    li = linear()
+    seen, cursor = [], None
+    while True:
+        page = _json(li.call("list_issues", {"limit": 2, **({"cursor": cursor} if cursor else {})}))
+        seen += [i["identifier"] for i in page["issues"]]
+        if not page["hasNextPage"]:
+            break
+        cursor = page["nextCursor"]
+    assert sorted(seen) == sorted({i["identifier"] for i in li.state["issues"].values()})
+    assert "invalid cursor" in li.call("list_issues", {"cursor": "nope"}).text
+
+
+# -- notion -------------------------------------------------------------------------------
+
+def notion(version=V1):
+    return Instance(get_service("notion"), version=version)
+
+
+def page_id(n, title):
+    return next(p["id"] for p in n.state["pages"].values() if p["title"] == title)
+
+
+def test_notion_access_levels():
+    n = notion()
+    q4, notes = page_id(n, "Q4 Planning"), page_id(n, "1:1 notes: John")
+    r = n.call("notion-update-page", {"page_id": q4, "command": "replace_content", "new_str": "x"})
+    assert r.is_error and "restricted_resource" in r.text
+    assert "restricted_resource" in n.call("notion-update-page", {"page_id": notes, "command": "replace_content",
+                                                                  "new_str": "x"}).text, "children inherit access"
+    assert not n.call("notion-create-comment", {"page_id": q4, "content": "Question on hiring"}).is_error
+    assert _json(n.call("notion-fetch", {"id": q4}))["metadata"]["access"] == "comment"
+    n.apply_action("set_access", {"title": "On-call runbook", "access": "view"})
+    rb = page_id(n, "On-call runbook")
+    assert "restricted_resource" in n.call("notion-create-comment", {"page_id": rb, "content": "hi"}).text
+    assert not notion(V0).call("notion-update-page", {"page_id": page_id(notion(V0), "Q4 Planning"),
+                                                      "command": "replace_content", "new_str": "x"}).is_error
+
+
+def test_notion_typed_filters_and_cursor():
+    n = notion()
+    tasks = next(iter(n.state["data_sources"].values()))["url"]
+    q = lambda f, **kw: _json(n.call("notion-query-data-sources", {"data_source_url": tasks, "filter": f, **kw}))  # noqa: E731
+    names = lambda r: [x["Name"] for x in r["results"]]  # noqa: E731
+    assert names(q({"Points": {">=": 3}})) == ["Rotate DB credentials", "Right-size staging cluster"]
+    assert names(q({"Owner": {"is_empty": True}})) == ["Right-size staging cluster"]
+    assert names(q({"Due": {"before": "2026-10-01"}})) == ["Rotate DB credentials"]
+    assert names(q({"Status": {"does_not_equal": "Done"}, "Name": {"contains": "db"}})) == ["Rotate DB credentials"]
+    assert names(q({"Tags": "billing"})) == ["Invoice currency bug"]
+    assert names(q({"Owner": "john@acme.com"})) == ["Rotate DB credentials"]
+    assert "not supported" in n.call("notion-query-data-sources", {"data_source_url": tasks, "filter": {"Name": {">": 1}}}).text
+    first = q({}, limit=2)
+    rest = q({}, limit=2, start_cursor=first["next_cursor"])
+    assert first["has_more"] and not rest["has_more"] and len(names(first) + names(rest)) == 3
+
+
+def test_notion_search_lags_and_duplicate_is_async():
+    n = notion()
+    wiki = page_id(n, "Engineering Wiki")
+    n.call("notion-create-pages", {"parent": {"page_id": wiki}, "pages": [{"properties": {"title": "Incident review"}}]})
+    assert _json(n.call("notion-search", {"query": "incident review"}))["results"] == []
+    n.advance(120)
+    assert _json(n.call("notion-search", {"query": "incident review"}))["results"]
+    dup = _json(n.call("notion-duplicate-page", {"page_url": wiki}))
+    assert dup["status"] == "in_progress"
+    assert "Start here" not in n.state["pages"][dup["page_id"]]["content"]
+    n.advance(60)
+    n.call("notion-get-users", {})
+    assert "Start here" in n.state["pages"][dup["page_id"]]["content"]

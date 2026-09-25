@@ -17,6 +17,12 @@ Realism gaps closed as new service versions (`2026-09-25.1`; the `2026-09-25` ve
 - **Jira:** 6 agile tools (boards, sprints, sprint issues, create/update sprint), `sprint` in JQL with
   `openSprints()` / `closedSprints()` / `futureSprints()`, Jira's sprint rules.
 - **Drive:** Sheets (cells, A1 ranges, USER_ENTERED vs RAW, formulas, grid limits) and Docs tools.
+- **Eventually consistent search** (`2026-09-25.2` for GitHub, Jira, Drive; Notion `2026-09-25.1`): search
+  indexes lag behind writes (new items missing, edits stale, deletes lingering) while get/list stay immediate.
+  Configurable per seed with `search_lag`.
+- **Linear `2026-09-25.1`:** cycles on issues, team estimate scales, exclusive label groups, cursor pagination.
+- **Notion `2026-09-25.1`:** page access levels (view/comment/edit, inherited), typed data source filters with
+  cursors, asynchronous page duplication.
 - **Noise and ambient activity** (`toolsim.noise`): seeded, realistic volume and distractors for Gmail,
   Slack, Calendar, GitHub, Jira and Drive, and background activity during a run, for per-episode variety.
 - **RL episodes** (`toolsim.rl.ToolEnv`): Gymnasium-style reset/step with a `submit` tool, rewards from

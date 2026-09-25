@@ -22,6 +22,14 @@ Seed format::
         properties: {Name: title, Status: {status: [Not started, In progress, Done]}, Owner: people,
                      Due: date, Tags: {multi_select: [infra, billing]}, Points: number, Shipped: checkbox}
         rows: [{Name: Rotate DB credentials, Status: In progress, Owner: john@acme.com, Due: 2026-09-26}]
+
+From 2026-09-25.1, like Notion: pages carry your access level (``access: full | edit | comment |
+view``, inherited by child pages and database rows), so view-only pages reject edits and
+comment-only pages reject everything but comments; search is eventually consistent (new and
+edited pages reach it about two minutes later; fetch is immediate); data source queries take
+typed filters (``{"Points": {">=": 3}}``, ``{"Due": {"before": "2026-10-01"}}``,
+``{"Owner": {"is_empty": true}}``, contains, does_not_equal) with cursor pagination; and
+duplicating a page finishes asynchronously.
 """
 
 from __future__ import annotations
@@ -34,6 +42,9 @@ from typing import Annotated, Any, Literal
 from ..core.instance import Instance, Service
 from ..core.tools import ToolError, action, tool
 
+V1 = "2026-09-25.1"
+SEARCH_LAG = {"pages": 120}
+ACCESS = ["view", "comment", "edit", "full"]
 PROPERTY_TYPES = {"title", "text", "number", "select", "multi_select", "status", "date", "people", "checkbox", "url",
                   "email", "phone"}
 
@@ -52,7 +63,9 @@ class Notion(Service):
     title = "Notion"
     description = "Simulated Notion workspace. Behaves like Notion's hosted MCP server; nothing is really changed."
     fidelity = "preview"  # tool names are real; some parameters/response shapes are inferred
-    versions = {"2026-09-25": "Initial release: 12 core tools modeled on Notion's hosted MCP server."}
+    versions = {"2026-09-25": "Initial release: 12 core tools modeled on Notion's hosted MCP server.",
+                V1: "Page access levels (view/comment/edit), eventually consistent search, typed data source "
+                    "filters with cursors, asynchronous page duplication."}
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -78,6 +91,21 @@ class Notion(Service):
         c("notion-get-comments", {"page_id": pid})
         c("notion-get-users", {})
         c("notion-get-teams", {})
+        if ctx.at_least(V1):
+            q4 = next(p for p in ctx.state["pages"].values() if p["title"] == "Q4 Planning")
+            c("notion-update-page", {"page_id": q4["id"], "command": "replace_content", "new_str": "x"})
+            c("notion-create-comment", {"page_id": q4["id"], "content": "Can we revisit the hiring risk?"})
+            c("notion-search", {"query": "Q4 retro"})
+            ctx.advance(150)
+            c("notion-search", {"query": "Q4 retro"})
+            c("notion-query-data-sources", {"data_source_url": tasks["url"], "filter": {"Points": {">=": 3}},
+                                            "sort": {"property": "Points", "direction": "descending"}, "limit": 1})
+            c("notion-query-data-sources", {"data_source_url": tasks["url"], "filter": {"Owner": {"is_empty": True}}})
+            c("notion-query-data-sources", {"data_source_url": tasks["url"], "filter": {"Name": {">": 3}}})
+            dup = c("notion-duplicate-page", {"page_url": wiki}).data["page_id"]
+            c("notion-fetch", {"id": dup})
+            ctx.advance(60)
+            c("notion-fetch", {"id": dup})
 
     def default_seed(self) -> dict[str, Any]:
         return {
@@ -89,7 +117,7 @@ class Notion(Service):
                  "content": "# Engineering Wiki\n\nStart here. Runbooks, architecture notes and team rituals."},
                 {"key": "runbook", "title": "On-call runbook", "parent": "wiki",
                  "content": "## Paging\nPages go to #api-oncall first.\n\n## Rollback\n1. Find the last green deploy.\n2. Run `deploy rollback <sha>`.\n3. Post in #api-oncall."},
-                {"key": "q4", "title": "Q4 Planning", "team": "Operations",
+                {"key": "q4", "title": "Q4 Planning", "team": "Operations", "access": "comment",
                  "content": "## Goals\n- Cut infra cost 15%\n- Ship Billing v2\n\n## Risks\n- Hiring is behind plan"},
                 {"title": "1:1 notes: John", "parent": "q4", "content": "- Wants to lead Billing v2"},
                 {"title": "Compensation 2026", "team": "Operations", "restricted": True,
@@ -125,6 +153,10 @@ class Notion(Service):
             team = next((tid for tid, t in state["teams"].items() if t["name"] == p.get("team")), None)
             page = _new_page(ctx, state, p["title"], parent, p.get("content", ""), icon=p.get("icon"), team=team)
             page["restricted"] = bool(p.get("restricted"))
+            if ctx.at_least(V1) and p.get("access"):
+                if p["access"] not in ACCESS:
+                    raise ValueError(f"page {p['title']!r}: access must be one of {', '.join(ACCESS)}")
+                page["access"] = p["access"]
             if p.get("key"):
                 keys[p["key"]] = page["id"]
         for d in seed.get("databases", []):
@@ -133,6 +165,9 @@ class Notion(Service):
                 keys[d["key"]] = ds["id"]
             for row in d.get("rows", []):
                 _new_row(ctx, state, ds, row)
+        if ctx.at_least(V1):
+            state["_v1"] = True
+            state["_search_lag"] = {**SEARCH_LAG, **(seed.get("search_lag") or {})}
         return state
 
     actor_key = "me"
@@ -290,7 +325,28 @@ def _page(state: dict[str, Any], ref: str, editable: bool = False) -> dict[str, 
         raise _not_found(f"page with ID: {ref}")
     if editable and p["in_trash"]:
         raise _err("Can't edit block that is archived. You must unarchive the block before editing.")
+    if editable:
+        _need(state, p, "edit")
     return p
+
+
+def _access(state: dict[str, Any], p: dict[str, Any] | None) -> str:
+    """Your access to a page: its own level, else its parent's (database rows: the database's page)."""
+    seen = 0
+    while p is not None and seen < 100:
+        if p.get("access"):
+            return p["access"]
+        par = p["parent"]
+        pid = state["data_sources"][par["id"]]["parent_page_id"] if par["type"] == "data_source_id" else par["id"]
+        p = state["pages"].get(pid) if pid else None
+        seen += 1
+    return "full"
+
+
+def _need(state: dict[str, Any], p: dict[str, Any], level: str) -> None:
+    if state.get("_v1") and ACCESS.index(_access(state, p)) < ACCESS.index(level):
+        raise _err(f"Insufficient permissions: you have '{_access(state, p)}' access to this page and need '{level}'.",
+                   "restricted_resource", 403)
 
 
 def _path(state: dict[str, Any], p: dict[str, Any]) -> list[str]:
@@ -346,7 +402,7 @@ def notion_search(ctx: Instance,
                   sort: Annotated[str | None, "Sort order, e.g. 'last_edited'"] = None,
                   limit: Annotated[int | None, "Maximum results (default 10)"] = 10) -> dict[str, Any]:
     """Search the Notion workspace for pages and databases (or users)"""
-    s = ctx.state
+    s = ctx.search_view("pages")
     words = query.lower().split()
     if query_type == "user":
         us = [u for u in s["users"].values() if all(w in f"{u['name']} {u['email']}".lower() for w in words)]
@@ -409,6 +465,10 @@ def notion_fetch(ctx: Instance, id: Annotated[str, "A Notion page or database UR
     body = p["content"] + "".join(f'\n<page url="{c["url"]}">{c["title"]}</page>' for c in children) + \
         "".join(f'\n<database url="{d["database_url"]}" data-source-url="{d["url"]}">{d["title"]}</database>' for d in dbs)
     import json as _json
+    if s.get("_v1"):
+        return {"metadata": {"type": "page", "access": _access(s, p)}, "title": p["title"], "url": p["url"],
+                "text": f'<page url="{p["url"]}">\n<ancestor-path>{" / ".join(_path(s, p))}</ancestor-path>\n'
+                        f"<properties>\n{_json.dumps(_props_view(s, p))}\n</properties>\n<content>\n{body}\n</content>\n</page>"}
     return {"metadata": {"type": "page"}, "title": p["title"], "url": p["url"],
             "text": f'<page url="{p["url"]}">\n<ancestor-path>{" / ".join(_path(s, p))}</ancestor-path>\n'
                     f"<properties>\n{_json.dumps(_props_view(s, p))}\n</properties>\n<content>\n{body}\n</content>\n</page>"}
@@ -422,6 +482,8 @@ def _parent(s: dict[str, Any], parent: dict[str, Any] | None) -> tuple[str, Any]
         ds = s["data_sources"].get(ref)
         if ds is None or ds["in_trash"]:
             raise _not_found(f"data source with ID: {ref}")
+        if s["pages"].get(ds["parent_page_id"]):
+            _need(s, s["pages"][ds["parent_page_id"]], "edit")
         return "data_source", ds
     if parent.get("page_id"):
         return "page", _page(s, parent["page_id"], editable=True)
@@ -528,6 +590,16 @@ def notion_duplicate_page(ctx: Instance, page_url: Annotated[str, "The page to d
     """Duplicate a Notion page (including its content) under the same parent"""
     s = ctx.state
     src = _page(s, page_url)
+    if s.get("_v1"):  # like Notion: the copy appears at once, its content a little later
+        parent = s["pages"].get(src["parent"]["id"]) if src["parent"]["type"] == "page_id" else None
+        if parent is not None:
+            _need(s, parent, "edit")
+        p = _new_page(ctx, s, src["title"], copy.deepcopy(src["parent"]), "", copy.deepcopy(src["properties"]),
+                      icon=src["icon"], team=src["team"])
+        ctx.schedule(ctx.rng.randint(10, 45), "finish_duplicate", {"source": src["id"], "copy": p["id"]},
+                     reason="duplication finishes")
+        return {"page_id": p["id"], "url": p["url"], "status": "in_progress",
+                "message": "Duplication started. The page content will appear once it completes."}
     p = _new_page(ctx, s, src["title"], copy.deepcopy(src["parent"]), src["content"], copy.deepcopy(src["properties"]),
                   icon=src["icon"], team=src["team"])
     return {"page_id": p["id"], "url": p["url"], "status": "succeeded"}
@@ -547,7 +619,7 @@ def notion_create_database(ctx: Instance,
     return {"database_url": ds["database_url"], "data_source_url": ds["url"], "id": ds["id"], "schema": ds["schema"]}
 
 
-@tool("notion-query-data-sources", read_only=True)
+@tool("notion-query-data-sources", read_only=True, until=V1)
 def notion_query_data_sources(ctx: Instance,
                               data_source_url: Annotated[str, "The data source to query (collection://... or ID)"],
                               mode: Annotated[Literal["rows", "sql", "view"] | None, "Query mode (this simulator supports 'rows')"] = "rows",
@@ -578,6 +650,99 @@ def notion_query_data_sources(ctx: Instance,
     return {"results": views[:lim], "has_more": len(views) > lim}
 
 
+_OPS = {"equals", "does_not_equal", "contains", "does_not_contain", ">", ">=", "<", "<=", "before", "after",
+        "on_or_before", "on_or_after", "is_empty", "is_not_empty"}
+_OPS_FOR = {"number": {"equals", "does_not_equal", ">", ">=", "<", "<=", "is_empty", "is_not_empty"},
+            "date": {"equals", "before", "after", "on_or_before", "on_or_after", "is_empty", "is_not_empty"},
+            "checkbox": {"equals", "does_not_equal"},
+            "multi_select": {"contains", "does_not_contain", "is_empty", "is_not_empty"},
+            "people": {"contains", "does_not_contain", "is_empty", "is_not_empty"},
+            "relation": {"contains", "does_not_contain", "is_empty", "is_not_empty"}}
+
+
+def _filter_ok(schema: dict[str, Any], prop: str, have: Any, cond: Any) -> bool:
+    typ = schema[prop]["type"]
+    shorthand = "contains" if typ in ("multi_select", "people", "relation") else "equals"
+    conds = cond if isinstance(cond, dict) else {shorthand: cond}
+    for op, want in conds.items():
+        if op not in _OPS:
+            raise _err(f"Invalid filter operator '{op}'. Use one of: {', '.join(sorted(_OPS))}")
+        allowed = _OPS_FOR.get(typ, {"equals", "does_not_equal", "contains", "does_not_contain", "is_empty", "is_not_empty"})
+        if op not in allowed:
+            raise _err(f"Invalid filter for property '{prop}' of type {typ}: '{op}' is not supported "
+                       f"(supported: {', '.join(sorted(allowed))})")
+        empty = have in (None, "", [])
+        if op == "is_empty":
+            ok = empty == bool(want)
+        elif op == "is_not_empty":
+            ok = (not empty) == bool(want)
+        elif empty:
+            ok = op in ("does_not_equal", "does_not_contain")
+        elif typ == "number":
+            try:
+                w = float(want)
+            except (TypeError, ValueError):
+                raise _err(f"Filter value for {prop} must be a number") from None
+            h = float(have)
+            ok = {"equals": h == w, "does_not_equal": h != w, ">": h > w, ">=": h >= w, "<": h < w, "<=": h <= w}[op]
+        elif typ == "date":
+            h, w = str(have)[:10], str(want)[:10]
+            ok = {"equals": h == w, "before": h < w, "after": h > w, "on_or_before": h <= w, "on_or_after": h >= w}[op]
+        elif typ == "checkbox":
+            w = want if isinstance(want, bool) else str(want).lower() in ("true", "yes", "1", "__yes__")
+            ok = (bool(have) == w) == (op == "equals")
+        elif isinstance(have, list):
+            hit = any(str(want).lower() == str(x).lower() for x in have)
+            ok = hit if op in ("contains", "equals") else not hit
+        else:
+            h, w = str(have).lower(), str(want).lower()
+            ok = {"equals": h == w, "does_not_equal": h != w, "contains": w in h, "does_not_contain": w not in h}[op]
+        if not ok:
+            return False
+    return True
+
+
+@tool("notion-query-data-sources", read_only=True, since=V1)
+def notion_query_data_sources_v1(ctx: Instance,
+                                 data_source_url: Annotated[str, "The data source to query (collection://... or ID)"],
+                                 mode: Annotated[Literal["rows", "sql", "view"] | None, "Query mode (this simulator supports 'rows')"] = "rows",
+                                 filter: Annotated[dict | None, "Filters per property: a value (equals) or operators, e.g. {\"Status\": \"Done\", \"Points\": {\">=\": 3}, \"Due\": {\"before\": \"2026-10-01\"}, \"Owner\": {\"is_empty\": true}}"] = None,
+                                 sort: Annotated[dict | None, "Sort: {\"property\": \"Due\", \"direction\": \"ascending\"}"] = None,
+                                 query: Annotated[str | None, "SQL query (mode 'sql')"] = None,
+                                 limit: Annotated[int | None, "Maximum rows per page (default 25, max 100)"] = 25,
+                                 start_cursor: Annotated[str | None, "next_cursor from a previous page"] = None) -> dict[str, Any]:
+    """Query rows of a Notion database (data source)"""
+    s = ctx.state
+    if mode not in (None, "rows"):
+        raise _err(f"mode '{mode}' is not supported by this simulator version; use mode 'rows'", "unsupported")
+    ds = s["data_sources"].get(_resolve_id(data_source_url))
+    if ds is None or ds["in_trash"]:
+        raise _not_found(f"data source: {data_source_url}")
+    title_prop = next(n for n, sp in ds["schema"].items() if sp["type"] == "title")
+    rows = sorted((p for p in s["pages"].values() if p["parent"] == {"type": "data_source_id", "id": ds["id"]}
+                   and not p["in_trash"]), key=lambda p: p["created_time"])
+    views = [_props_view(s, p) | {"id": p["id"], "url": p["url"]} for p in rows]
+    for prop, cond in (filter or {}).items():
+        if prop not in ds["schema"]:
+            raise _err(f"Could not find property with name or id: {prop}")
+        views = [v for v in views if _filter_ok(ds["schema"], prop, v.get(prop, v.get(title_prop) if prop == title_prop else None), cond)]
+    if sort:
+        prop = sort.get("property")
+        if prop not in ds["schema"]:
+            raise _err(f"Could not find sort property with name or id: {prop}")
+        views.sort(key=lambda v: (v.get(prop) is None, v.get(prop) if isinstance(v.get(prop), (int, float)) else str(v.get(prop))),
+                   reverse=sort.get("direction") == "descending")
+    start = 0
+    if start_cursor:
+        start = next((n + 1 for n, v in enumerate(views) if v["id"] == start_cursor), -1)
+        if start < 0:
+            raise _err("start_cursor is invalid or expired")
+    lim = max(1, min(limit or 25, 100))
+    page = views[start:start + lim]
+    more = start + lim < len(views)
+    return {"results": page, "has_more": more, "next_cursor": page[-1]["id"] if more and page else None}
+
+
 @tool("notion-create-comment")
 def notion_create_comment(ctx: Instance,
                           page_id: Annotated[str, "The page to comment on"],
@@ -586,6 +751,7 @@ def notion_create_comment(ctx: Instance,
     """Add a comment to a Notion page"""
     s = ctx.state
     p = _page(s, page_id)
+    _need(s, p, "comment")
     if not content.strip():
         raise _err("Comment content can't be empty.")
     c = {"id": _id(ctx), "discussion_id": _id(ctx), "block_id": block_id, "content": content, "created_by": s["me"], "created_time": _iso(ctx),
@@ -619,7 +785,8 @@ def notion_get_teams(ctx: Instance, query: Annotated[str | None, "Filter teamspa
 
 
 Notion.tools = [notion_search, notion_fetch, notion_create_pages, notion_update_page, notion_move_pages,
-                notion_duplicate_page, notion_create_database, notion_query_data_sources, notion_create_comment,
+                notion_duplicate_page, notion_create_database, notion_query_data_sources, notion_query_data_sources_v1,
+                notion_create_comment,
                 notion_get_comments, notion_get_users, notion_get_teams]
 
 
@@ -645,4 +812,21 @@ def act_restrict_page(ctx: Instance, title: str, restricted: bool = True) -> Non
     _titled(ctx.state, title)["restricted"] = restricted
 
 
-Notion.actions = [act_edit_page, act_restrict_page]
+@action("finish_duplicate")
+def act_finish_duplicate(ctx: Instance, source: str, copy: str) -> None:
+    """An asynchronous duplication completes: the copy gets the source's content (as it is now)."""
+    src, dst = ctx.state["pages"].get(source), ctx.state["pages"].get(copy)
+    if src is None or dst is None:
+        return
+    dst["content"], dst["last_edited_time"] = src["content"], _iso(ctx)
+
+
+@action("set_access")
+def act_set_access(ctx: Instance, title: str, access: str) -> None:
+    """Someone changes your access to a page (e.g. to view-only)."""
+    if access not in ACCESS:
+        raise _err(f"access must be one of {', '.join(ACCESS)}")
+    _titled(ctx.state, title)["access"] = access
+
+
+Notion.actions = [act_edit_page, act_restrict_page, act_finish_duplicate, act_set_access]

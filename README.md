@@ -59,11 +59,11 @@ Environment  (task + subset of servers + seeds + faults + checks)      envs/*.ya
 | `gmail` | 19 | GongRzhe/Gmail-MCP-Server | documented | Gmail search syntax, threads, system labels can't be deleted, bounces for typo'd addresses, out-of-office replies, daily send quota |
 | `calendar` | 11 | nspady/google-calendar-mcp | documented | time zones, read-only calendars (403), delete twice (410), recurring events (RRULE/EXDATE, per-instance edits, `modificationScope`), colleagues who accept or decline |
 | `slack` | 8 | reference Slack MCP server | documented | `not_in_channel`, hidden private channels, duplicate reactions, channel IDs required (names only for posting), DMs by user ID, `@name` isn't a mention |
-| `github` | 26 | reference GitHub MCP server | documented | real git SHAs, merge conflicts, protected branches, required checks and approvals, CI that runs on push, closing keywords |
-| `jira` | 22 | sooperset/mcp-atlassian | documented | workflow transitions, JQL (with sprint functions), boards and sprints, "status can't be set directly" |
-| `drive` | 23 | taylorwilsdon/google_workspace_mcp | documented (Sheets/Docs: preview) | reader-only files, admin blocks external sharing, Drive query syntax, A1 ranges, formulas, grid limits, Docs indices |
-| `linear` | 23 | Linear hosted MCP | preview | team-scoped states and labels |
-| `notion` | 12 | Notion hosted MCP (core tools) | preview | restricted pages are invisible, strict status options |
+| `github` | 26 | reference GitHub MCP server | documented | real git SHAs, merge conflicts, protected branches, required checks and approvals, CI that runs on push, closing keywords, search that lags behind writes |
+| `jira` | 22 | sooperset/mcp-atlassian | documented | workflow transitions, JQL (with sprint functions), boards and sprints, "status can't be set directly", lagging JQL index |
+| `drive` | 23 | taylorwilsdon/google_workspace_mcp | documented (Sheets/Docs: preview) | reader-only files, admin blocks external sharing, Drive query syntax, A1 ranges, formulas, grid limits, Docs indices, lagging search |
+| `linear` | 23 | Linear hosted MCP | preview | team-scoped states and labels, exclusive label groups, estimate scales, cycles, cursor pagination |
+| `notion` | 12 | Notion hosted MCP (core tools) | preview | restricted pages are invisible, view/comment-only pages, strict status options, typed filters, lagging search, async duplication |
 
 *documented*: tool names and parameters come from the real server's published reference.
 *preview*: tool names are real, but some parameters or response shapes are inferred.

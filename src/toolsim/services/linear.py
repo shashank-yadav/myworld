@@ -16,7 +16,14 @@ Seed format::
         projects: [{name: Billing v2, state: started, lead: john@acme.com}]
         issues:
           - {title: Duplicate charges on retry, state: In Progress, priority: 1, assignee: john@acme.com,
-             labels: [Bug], project: Billing v2, comments: [{author: alex@acme.com, body: Customer escalated}]}
+             labels: [Bug], project: Billing v2, cycle: current, comments: [{author: alex@acme.com, body: Customer escalated}]}
+        estimates: fibonacci                  # 2026-09-25.1: fibonacci | exponential | linear | tshirt | none
+        label_groups: {Type: [Bug, Feature]}  # 2026-09-25.1: one label per group
+
+From 2026-09-25.1, like Linear: issues join cycles (by number, name, or current/next; completed
+cycles are closed), estimates must be on the team's scale (or are rejected when a team doesn't
+use estimates), labels in a group are mutually exclusive and a group can't be applied itself, and
+list_issues pages with a cursor.
 """
 
 from __future__ import annotations
@@ -29,6 +36,9 @@ from typing import Annotated, Any, Literal
 from ..core.instance import Instance, Service
 from ..core.tools import ToolError, action, tool
 
+V1 = "2026-09-25.1"
+SCALES = {"fibonacci": [1, 2, 3, 5, 8], "exponential": [1, 2, 4, 8, 16], "linear": [1, 2, 3, 4, 5],
+          "tshirt": [1, 2, 3, 5, 8], "none": []}
 PRIORITY_NAMES = {0: "No priority", 1: "Urgent", 2: "High", 3: "Medium", 4: "Low"}
 DEFAULT_STATES = [("Backlog", "backlog", "#bec2c8"), ("Todo", "unstarted", "#e2e2e2"), ("In Progress", "started", "#f2c94c"),
                   ("In Review", "started", "#0f783c"), ("Done", "completed", "#5e6ad2"), ("Canceled", "canceled", "#95a2b3"),
@@ -56,7 +66,8 @@ class Linear(Service):
     title = "Linear"
     description = "Simulated Linear workspace. Behaves like Linear's MCP server; nothing is really changed."
     fidelity = "preview"  # tool names are real; some parameters/response shapes are inferred
-    versions = {"2026-09-25": "Initial release: 23 tools modeled on Linear's hosted MCP server."}
+    versions = {"2026-09-25": "Initial release: 23 tools modeled on Linear's hosted MCP server.",
+                V1: "Cycles on issues, team estimate scales, exclusive label groups, cursor pagination for list_issues."}
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -77,6 +88,17 @@ class Linear(Service):
         c("list_cycles", {"teamId": "ENG", "type": "current"})
         c("get_user", {"query": "me"})
         c("search_documentation", {"query": "priority"})
+        if ctx.at_least(V1):
+            c("create_issue", {"title": "Refund webhooks", "team": "ENG", "cycle": "current", "estimate": 3})
+            c("create_issue", {"title": "x", "team": "ENG", "estimate": 4})
+            c("create_issue", {"title": "x", "team": "OPS", "estimate": 1})
+            c("update_issue", {"id": "ENG-2", "labels": ["Bug", "Feature"]})
+            c("update_issue", {"id": "ENG-2", "cycle": "1"})
+            c("update_issue", {"id": "ENG-2", "cycle": "next", "labels": ["Feature", "Tech debt"]})
+            page = c("list_issues", {"team": "ENG", "limit": 2}).data
+            c("list_issues", {"team": "ENG", "limit": 2, "cursor": page["nextCursor"]})
+            c("list_issues", {"cycle": "current"})
+            c("list_issue_labels", {"team": "ENG"})
 
     def default_seed(self) -> dict[str, Any]:
         return {
@@ -84,11 +106,12 @@ class Linear(Service):
             "users": [{"name": "John Park", "email": "john@acme.com"}, {"name": "Priya Shah", "email": "priya@acme.com"}],
             "teams": [
                 {"key": "ENG", "name": "Engineering", "labels": ["Bug", "Feature", "Tech debt"],
+                 "estimates": "fibonacci", "label_groups": {"Type": ["Bug", "Feature"]},
                  "projects": [{"name": "Billing v2", "state": "started", "lead": "john@acme.com",
                                "targetDate": "2026-10-31", "summary": "Rebuild invoicing and refunds"}],
                  "issues": [
                      {"title": "Duplicate charges when payment retries", "state": "In Progress", "priority": 1,
-                      "assignee": "john@acme.com", "labels": ["Bug"], "project": "Billing v2",
+                      "assignee": "john@acme.com", "labels": ["Bug"], "project": "Billing v2", "cycle": "current",
                       "comments": [{"author": "alex@acme.com", "body": "Two customers escalated this week."}]},
                      {"title": "Invoice PDF renders wrong currency symbol", "state": "Todo", "priority": 3,
                       "labels": ["Bug"], "project": "Billing v2"},
@@ -118,6 +141,18 @@ class Linear(Service):
                 state["states"][sid] = {"id": sid, "name": name, "type": typ, "color": color, "position": pos, "teamId": tid}
             for name in t.get("labels", []):
                 _new_label(ctx, state, name, tid)
+            if ctx.at_least(V1):
+                scale = t.get("estimates", "none")
+                if scale not in SCALES:
+                    raise ValueError(f"team {t['key']}: estimates must be one of {', '.join(SCALES)}")
+                state["teams"][tid]["estimates"] = scale
+                for group, members in (t.get("label_groups") or {}).items():
+                    gid = _new_label(ctx, state, group, tid)["id"]
+                    state["labels"][gid]["isGroup"] = True
+                    for m in members:
+                        lab = next((l for l in state["labels"].values() if l["name"] == m and l["teamId"] == tid), None)
+                        lab = lab or _new_label(ctx, state, m, tid)
+                        lab["parentId"] = gid
             start = ctx.now().date() - dt.timedelta(days=ctx.now().weekday())
             for n, offset in ((1, -2), (2, 0), (3, 2)):
                 cid = _uuid(ctx)
@@ -132,8 +167,12 @@ class Linear(Service):
                                           "teamIds": [tid], "startDate": p.get("startDate"), "targetDate": p.get("targetDate"),
                                           "createdAt": _iso(ctx), "updatedAt": _iso(ctx), "archivedAt": None,
                                           "url": f"https://linear.app/acme/project/{_slug(p['name'])}-{pid[:12]}", "labels": []}
+            if ctx.at_least(V1):
+                state["_v1"] = True
             for i in t.get("issues", []):
                 issue = _create(ctx, state, {**i, "team": t["key"]}, creator=state["viewer"])
+                if i.get("cycle") and state.get("_v1"):
+                    issue["cycleId"] = _find_cycle(state, issue["teamId"], str(i["cycle"]), ctx.now().date().isoformat())["id"]
                 for c in i.get("comments", []):
                     _comment(ctx, state, issue["id"], c["body"], _find_user(state, c.get("author", "me"))["id"])
         for d in seed.get("documents", []):
@@ -248,7 +287,58 @@ def _labels_for(state: dict[str, Any], team_id: str, names: list[str]) -> list[s
         if lab is None:
             raise _not_found(f"IssueLabel '{n}'")
         out.append(lab["id"])
+    if state.get("_v1"):
+        seen: dict[str, str] = {}
+        for lid in out:
+            lab = state["labels"][lid]
+            if lab.get("isGroup"):
+                raise _err(f"Argument Validation Error: '{lab['name']}' is a label group and can't be applied to issues")
+            g = lab.get("parentId")
+            if g in seen:
+                raise _err(f"Argument Validation Error: labels '{seen[g]}' and '{lab['name']}' are both in the "
+                           f"'{state['labels'][g]['name']}' group; an issue can have only one label from a group")
+            if g:
+                seen[g] = lab["name"]
     return out
+
+
+def _find_cycle(state: dict[str, Any], team_id: str, q: str, today: str) -> dict[str, Any]:
+    cycles = sorted((c for c in state["cycles"].values() if c["teamId"] == team_id), key=lambda c: c["startsAt"])
+    ql = q.lower()
+    if ql == "current":
+        hit = next((c for c in cycles if c["startsAt"] <= today < c["endsAt"]), None)
+    elif ql == "next":
+        hit = next((c for c in cycles if c["startsAt"] > today), None)
+    elif ql == "previous":
+        hit = ([c for c in cycles if c["endsAt"] <= today] or [None])[-1]
+    else:
+        hit = next((c for c in cycles if ql in (c["id"], str(c["number"]), c["name"].lower())), None)
+    if hit is None:
+        raise _not_found(f"Cycle '{q}'")
+    return hit
+
+
+def _check_estimate(state: dict[str, Any], team: dict[str, Any], estimate: Any) -> None:
+    if estimate is None or not state.get("_v1"):
+        return
+    scale = SCALES[team.get("estimates", "none")]
+    if not scale:
+        raise _err(f"Argument Validation Error: estimates are not enabled for team {team['key']}")
+    if estimate not in scale:
+        raise _err(f"Argument Validation Error: estimate must be one of {', '.join(map(str, scale))} for team {team['key']}")
+
+
+def _set_cycle(ctx: Instance, state: dict[str, Any], issue: dict[str, Any], q: str | None) -> None:
+    if q is None:
+        return
+    if q == "":
+        issue["cycleId"] = None
+        return
+    today = ctx.now().date().isoformat()
+    c = _find_cycle(state, issue["teamId"], q, today)
+    if c["endsAt"] <= today:
+        raise _err(f"Argument Validation Error: cycle {c['number']} is completed; issues can't be added to it")
+    issue["cycleId"] = c["id"]
 
 
 def _priority(p: Any) -> int:
@@ -279,6 +369,7 @@ def _create(ctx: Instance, state: dict[str, Any], a: dict[str, Any], creator: st
     if parent and not project and parent["projectId"]:
         project = state["projects"][parent["projectId"]]
     assignee = _find_user(state, a["assignee"])["id"] if a.get("assignee") else None
+    _check_estimate(state, team, a.get("estimate"))
     issue = {"id": iid, "identifier": identifier, "number": number, "title": a["title"],
              "description": a.get("description"), "priority": _priority(a.get("priority")), "stateId": st["id"],
              "teamId": team["id"], "assigneeId": assignee, "creatorId": creator,
@@ -325,6 +416,9 @@ def _issue_json(state: dict[str, Any], i: dict[str, Any], full: bool = False) ->
            "project": state["projects"][i["projectId"]]["name"] if i["projectId"] else None, "projectId": i["projectId"],
            "team": team["name"], "teamId": team["id"],
            "parentId": i["parentId"], "estimate": i["estimate"]}
+    if state.get("_v1"):
+        c = state["cycles"].get(i["cycleId"]) if i["cycleId"] else None
+        out["cycle"] = {"id": c["id"], "number": c["number"], "name": c["name"]} if c else None
     if full:
         out["description"] = i["description"]
         out["children"] = [x["identifier"] for x in state["issues"].values() if x["parentId"] == i["id"]]
@@ -344,7 +438,7 @@ def _project_json(state: dict[str, Any], p: dict[str, Any]) -> dict[str, Any]:
 
 # -- tools: issues -------------------------------------------------------------------------
 
-@tool("list_issues", read_only=True)
+@tool("list_issues", read_only=True, until=V1)
 def list_issues(ctx: Instance,
                 query: Annotated[str | None, "Search issue titles and descriptions"] = None,
                 team: Annotated[str | None, "Team name, key or ID"] = None,
@@ -359,6 +453,17 @@ def list_issues(ctx: Instance,
                 limit: Annotated[int | None, "Max results (default 50, max 250)"] = 50) -> dict[str, Any]:
     """List issues in the user's Linear workspace"""
     s = ctx.state
+    out = _filter_issues(ctx, query, team, state, assignee, label, project, {cycle} if cycle else None, parentId,
+                         includeArchived, orderBy)
+    lim = max(1, min(limit or 50, 250))
+    return {"issues": [_issue_json(s, i) for i in out[:lim]], "hasNextPage": len(out) > lim}
+
+
+def _filter_issues(ctx: Instance, query: str | None, team: str | None, state: str | None, assignee: str | None,
+                   label: str | None, project: str | None, cycles: set[str] | None, parentId: str | None,
+                   includeArchived: bool | None, orderBy: str | None) -> list[dict[str, Any]]:
+    s = ctx.state
+    cycle = cycles
     team_id = _find_team(s, team)["id"] if team else None
     assignee_id = _find_user(s, assignee)["id"] if assignee else None
     project_id = _find_project(s, project)["id"] if project else None
@@ -368,7 +473,7 @@ def list_issues(ctx: Instance,
         st = s["states"][i["stateId"]]
         if (team_id and i["teamId"] != team_id) or (assignee_id and i["assigneeId"] != assignee_id) \
                 or (project_id and i["projectId"] != project_id) or (parent and i["parentId"] != parent) \
-                or (cycle and i["cycleId"] != cycle) or (i["archivedAt"] and not includeArchived):
+                or (cycle and i["cycleId"] not in cycle) or (i["archivedAt"] and not includeArchived):
             continue
         if state and state.lower() not in (st["name"].lower(), st["id"], st["type"]):
             continue
@@ -378,8 +483,47 @@ def list_issues(ctx: Instance,
             continue
         out.append(i)
     out.sort(key=lambda i: (i[orderBy or "updatedAt"], i["number"]), reverse=True)
+    return out
+
+
+@tool("list_issues", read_only=True, since=V1)
+def list_issues_v1(ctx: Instance,
+                   query: Annotated[str | None, "Search issue titles and descriptions"] = None,
+                   team: Annotated[str | None, "Team name, key or ID"] = None,
+                   state: Annotated[str | None, "Status name or ID"] = None,
+                   assignee: Annotated[str | None, "User ID, name, email, or 'me'"] = None,
+                   label: Annotated[str | None, "Label name or ID"] = None,
+                   project: Annotated[str | None, "Project name or ID"] = None,
+                   cycle: Annotated[str | None, "Cycle ID, number or name, or 'current' / 'next' / 'previous'"] = None,
+                   parentId: Annotated[str | None, "Parent issue ID or identifier"] = None,
+                   includeArchived: Annotated[bool | None, "Include archived issues"] = False,
+                   orderBy: Annotated[Literal["createdAt", "updatedAt"] | None, "Sort order"] = "updatedAt",
+                   limit: Annotated[int | None, "Max results (default 50, max 250)"] = 50,
+                   cursor: Annotated[str | None, "Cursor from a previous page (nextCursor)"] = None) -> dict[str, Any]:
+    """List issues in the user's Linear workspace"""
+    s = ctx.state
+    cycles = None
+    if cycle:
+        today = ctx.now().date().isoformat()
+        teams = [_find_team(s, team)] if team else list(s["teams"].values())
+        cycles = set()
+        for t in teams:
+            try:
+                cycles.add(_find_cycle(s, t["id"], cycle, today)["id"])
+            except ToolError:
+                if team:
+                    raise
+    out = _filter_issues(ctx, query, team, state, assignee, label, project, cycles, parentId, includeArchived, orderBy)
+    start = 0
+    if cursor:
+        start = next((n + 1 for n, i in enumerate(out) if i["id"] == cursor), -1)
+        if start < 0:
+            raise _err("Argument Validation Error: invalid cursor")
     lim = max(1, min(limit or 50, 250))
-    return {"issues": [_issue_json(s, i) for i in out[:lim]], "hasNextPage": len(out) > lim}
+    page = out[start:start + lim]
+    more = start + lim < len(out)
+    return {"issues": [_issue_json(s, i) for i in page], "hasNextPage": more,
+            "nextCursor": page[-1]["id"] if more and page else None}
 
 
 @tool("get_issue", read_only=True)
@@ -388,7 +532,7 @@ def get_issue(ctx: Instance, id: Annotated[str, "Issue ID or identifier (e.g. EN
     return _issue_json(ctx.state, _find_issue(ctx.state, id), full=True)
 
 
-@tool("create_issue")
+@tool("create_issue", until=V1)
 def create_issue(ctx: Instance,
                  title: Annotated[str, "Issue title"],
                  team: Annotated[str, "Team name, key or ID"],
@@ -409,7 +553,7 @@ def create_issue(ctx: Instance,
     return _issue_json(s, issue, full=True)
 
 
-@tool("update_issue", idempotent=True)
+@tool("update_issue", idempotent=True, until=V1)
 def update_issue(ctx: Instance,
                  id: Annotated[str, "Issue ID or identifier"],
                  title: Annotated[str | None, "New title"] = None,
@@ -453,6 +597,54 @@ def update_issue(ctx: Instance,
     if estimate is not None:
         i["estimate"] = estimate
     i["updatedAt"] = _iso(ctx)
+    return _issue_json(s, i, full=True)
+
+
+@tool("create_issue", since=V1)
+def create_issue_v1(ctx: Instance,
+                    title: Annotated[str, "Issue title"],
+                    team: Annotated[str, "Team name, key or ID"],
+                    description: Annotated[str | None, "Content as Markdown"] = None,
+                    assignee: Annotated[str | None, "User ID, name, email, or 'me'"] = None,
+                    state: Annotated[str | None, "State type, name, or ID"] = None,
+                    priority: Annotated[int | None, "0 = No priority, 1 = Urgent, 2 = High, 3 = Normal, 4 = Low"] = None,
+                    labels: Annotated[list[str] | None, "Label names or IDs"] = None,
+                    project: Annotated[str | None, "Project name or ID"] = None,
+                    cycle: Annotated[str | None, "Cycle ID, number or name, or 'current' / 'next'"] = None,
+                    parentId: Annotated[str | None, "Parent issue ID or identifier"] = None,
+                    dueDate: Annotated[str | None, "Due date (ISO format)"] = None,
+                    estimate: Annotated[int | None, "Issue estimate value (on the team's estimate scale)"] = None) -> dict[str, Any]:
+    """Create a new Linear issue"""
+    s = ctx.state
+    issue = _create(ctx, s, {"title": title, "team": team, "description": description, "assignee": assignee,
+                             "state": state, "priority": priority, "labels": labels, "project": project,
+                             "parentId": parentId, "dueDate": dueDate, "estimate": estimate}, creator=s["viewer"])
+    _set_cycle(ctx, s, issue, cycle)
+    return _issue_json(s, issue, full=True)
+
+
+@tool("update_issue", idempotent=True, since=V1)
+def update_issue_v1(ctx: Instance,
+                    id: Annotated[str, "Issue ID or identifier"],
+                    title: Annotated[str | None, "New title"] = None,
+                    description: Annotated[str | None, "Content as Markdown"] = None,
+                    assignee: Annotated[str | None, "User ID, name, email, or 'me'. Empty string to unassign"] = None,
+                    state: Annotated[str | None, "State type, name, or ID"] = None,
+                    priority: Annotated[int | None, "0 = No priority, 1 = Urgent, 2 = High, 3 = Normal, 4 = Low"] = None,
+                    labels: Annotated[list[str] | None, "Label names or IDs (replaces existing)"] = None,
+                    project: Annotated[str | None, "Project name or ID"] = None,
+                    cycle: Annotated[str | None, "Cycle ID, number or name, or 'current' / 'next'. Empty string to remove"] = None,
+                    parentId: Annotated[str | None, "Parent issue ID or identifier"] = None,
+                    dueDate: Annotated[str | None, "Due date (ISO format)"] = None,
+                    estimate: Annotated[int | None, "Issue estimate value (on the team's estimate scale)"] = None) -> dict[str, Any]:
+    """Update an existing Linear issue"""
+    s = ctx.state
+    i = _find_issue(s, id)
+    _check_estimate(s, s["teams"][i["teamId"]], estimate)
+    update_issue.fn(ctx, id=id, title=title, description=description, assignee=assignee, state=state,
+                    priority=priority, labels=labels, project=project, parentId=parentId, dueDate=dueDate,
+                    estimate=estimate)
+    _set_cycle(ctx, s, i, cycle)
     return _issue_json(s, i, full=True)
 
 
@@ -700,6 +892,7 @@ def search_documentation(ctx: Instance,
 
 
 Linear.tools = [list_comments, create_comment, list_cycles, get_document, list_documents, get_issue, list_issues,
+                list_issues_v1, create_issue_v1, update_issue_v1,
                 create_issue, update_issue, list_issue_statuses, get_issue_status, list_issue_labels, create_issue_label,
                 list_projects, get_project, create_project, update_project, list_project_labels, list_teams, get_team,
                 list_users, get_user, search_documentation]
