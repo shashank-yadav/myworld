@@ -14,6 +14,7 @@ import argparse
 import json
 import os
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -195,7 +196,15 @@ def cmd_grade(args: argparse.Namespace) -> None:
     token = args.token or os.environ.get("TOOLSIM_TOKEN")
     if token:
         req.add_header("Authorization", f"Bearer {token}")
-    report = json.load(urllib.request.urlopen(req, timeout=30))  # noqa: S310 (scheme checked above)
+    try:
+        report = json.load(urllib.request.urlopen(req, timeout=30))  # noqa: S310 (scheme checked above)
+    except urllib.error.HTTPError as e:
+        raise SystemExit(f"the host at {args.url} answered {e.code}: "
+                         + ("no such run; is it running there (toolsim serve --env ...)?" if e.code == 404
+                            else e.read().decode(errors="replace")[:300])) from None
+    except urllib.error.URLError:
+        raise SystemExit(f"no toolsim host at {args.url}; start one with `toolsim serve --env {args.env}` "
+                         "(or pass --url)") from None
     if args.json:
         print(json.dumps(report, indent=2))
     else:
