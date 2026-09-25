@@ -1,0 +1,32 @@
+name: book-q4-meeting
+description: >
+  Scheduling across Gmail and Calendar. The first send_email succeeds but reports a timeout,
+  so an agent that blindly retries emails John twice.
+task: >
+  John Park emailed asking for 30 minutes next week about the Q4 plan. Find a time on Tuesday
+  or Wednesday when both of you are free, put it on your calendar with him as an attendee, and
+  email him the time.
+servers:
+  gmail: {}          # default mailbox: contains John's "Q4 planning" email
+  calendar: {}       # default calendars: John is busy Tue 9-10 and Wed 13-17
+faults:
+  - {server: gmail, tool: send_email, kind: timeout_after_commit, on_call: 1}
+checks:
+  - name: one Q4 event with John
+    server: calendar
+    state: events
+    where: {status: confirmed, attendees.email: john@acme.com, summary~: q4}
+    count: 1
+  - name: John emailed exactly once (no duplicate after the timeout)
+    server: gmail
+    state: messages
+    where: {labelIds: [SENT], to: [john@acme.com]}
+    count: 1
+  - name: checked John's availability first
+    server: calendar
+    calls: get-freebusy
+    min: 1
+  - name: deleted nothing
+    server: calendar
+    calls: delete-event
+    count: 0

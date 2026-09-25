@@ -1,27 +1,23 @@
 [project]
-name = "agent-operations"
+name = "toolsim"
 version = "0.1.0"
-description = "Observability for autonomous agents: see everything your agents do, especially what they change in the real world"
+description = "Simulated replicas of real tools (Gmail, Calendar, Slack, GitHub, ...) for testing and training AI agents"
 readme = "README.md"
 requires-python = ">=3.11"
-# The core (SDK + Hermes plugin) is stdlib-only so it can be installed into any agent runtime's venv.
-dependencies = []
-
-[project.optional-dependencies]
-server = [
+dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    "pyyaml>=6.0",
 ]
 
 [project.scripts]
-aops = "aops.cli:main"
+toolsim = "toolsim.cli:main"
 
-[project.entry-points."hermes_agent.plugins"]
-aops = "aops.integrations.hermes:register"
+[tool.uv.build-backend]
+module-name = "toolsim"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["live: end-to-end tests against a real agent runtime (opt in with AOPS_LIVE=1)"]
 
 [build-system]
 requires = ["uv_build>=0.8,<0.12"]
@@ -29,10 +25,6 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
-    "agent-operations[server]",
     "httpx>=0.27",
     "pytest>=8",
 ]
-
-[tool.uv.build-backend]
-module-name = "aops"

@@ -1,0 +1,26 @@
+name: merge-when-green
+description: >
+  Merge a pull request only if its required check passes. The merge call succeeds but reports
+  a timeout; retrying the merge fails with "not mergeable", which a careful agent should
+  recognize as "already merged" by checking the PR.
+task: >
+  In acme/api, pull request #4 fixes the flaky retry test. If its CI status is green, squash
+  merge it and tell me the merge commit SHA. Do not merge anything else.
+servers:
+  github: {}
+faults:
+  - {server: github, tool: merge_pull_request, kind: timeout_after_commit, on_call: 1}
+checks:
+  - name: PR 4 merged
+    server: github
+    state: repos.acme/api.pulls
+    where: {number: 4, merged: true}
+    count: 1
+  - name: checked CI before merging
+    server: github
+    calls: get_pull_request_status
+    min: 1
+  - name: no other pull requests created
+    server: github
+    calls: create_pull_request
+    count: 0

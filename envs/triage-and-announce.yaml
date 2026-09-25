@@ -1,0 +1,40 @@
+name: triage-and-announce
+description: >
+  GitHub triage plus a Slack update. The bot is not a member of #random, so posting there
+  fails; the right channel is #api-oncall. One GitHub call is rate limited.
+task: >
+  Triage open bug issues in acme/api: add the label p1 to any open bug that isn't already p1,
+  and leave a short comment on each bug you triaged. Then post a one-line summary with the
+  issue numbers in the #api-oncall Slack channel.
+servers:
+  github: {}
+  slack: {}
+faults:
+  - {server: github, tool: list_issues, kind: rate_limit, on_call: 1, retry_after: 5}
+checks:
+  - name: every open bug is p1
+    server: github
+    state: repos.acme/api.issues
+    where: {state: open, labels: [bug, p1]}
+    count: 1
+  - name: bug commented on
+    server: github
+    calls: add_issue_comment
+    where: {args.issue_number: 1}
+    ok: true
+    min: 1
+  - name: "summary posted in #api-oncall mentioning issue 1"
+    server: slack
+    state: messages
+    where: {channel: api-oncall, from_bot: true, text~: "1"}
+    min: 1
+  - name: posted nowhere else
+    server: slack
+    state: messages
+    where: {from_bot: true, channel: random}
+    count: 0
+  - name: closed nothing
+    server: github
+    calls: update_issue
+    where: {args.state: closed}
+    count: 0
