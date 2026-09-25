@@ -6,8 +6,8 @@ from typing import Annotated, Any, Literal
 
 from ...core.instance import Instance
 from ...core.tools import ToolError, tool
-from .delivery import _after_send, _check_quota, _deliver
-from .model import V1, _addr, _check_labels, _get, _invalid, _label_by_name, _mb, _new_label, _not_found, _store
+from .delivery import _send
+from .model import _check_labels, _get, _invalid, _label_by_name, _mb, _new_label, _not_found, _store
 from .search import _matches
 
 
@@ -24,26 +24,10 @@ def send_email(ctx: Instance,
                threadId: Annotated[str | None, "Thread ID to reply to"] = None,
                inReplyTo: Annotated[str | None, "Message ID being replied to"] = None) -> str:
     """Sends a new email"""
-    s = _mb(ctx)
     if not to:
         raise _invalid("Recipient address required")
-    if ctx.at_least(V1):
-        _check_quota(ctx, s, len(to) + len(cc or []) + len(bcc or []))
-    for a in [*to, *(cc or []), *(bcc or [])]:
-        if "@" not in _addr(a):
-            raise _invalid(f"Invalid To header: {a}")
-    if threadId and not any(m["threadId"] == threadId for m in s["messages"].values()):
-        raise _not_found()
-    user = s["user"]
-    msg = _store(ctx, s, sender=f"{user['name']} <{user['email']}>", to=to, cc=cc or [], bcc=bcc or [],
-                 subject=subject, body=body, html_body=htmlBody, labels=["SENT"], date=ctx.now(), thread_id=threadId,
-                 attachments=[{"filename": p.rsplit("/", 1)[-1]} for p in attachments or []])
-    # mail to yourself lands in your inbox too
-    if user["email"].lower() in {_addr(a) for a in [*to, *(cc or [])]}:
-        msg["labelIds"] += ["INBOX", "UNREAD"]
-    _deliver(ctx, msg, s)  # colleagues in this world actually receive it
-    if ctx.at_least(V1):
-        _after_send(ctx, msg)
+    msg = _send(ctx, _mb(ctx), to=to, cc=cc or [], bcc=bcc or [], subject=subject, body=body, html_body=htmlBody,
+                attachments=[{"filename": p.rsplit("/", 1)[-1]} for p in attachments or []], thread_id=threadId)
     return f"Email sent successfully with ID: {msg['id']}"
 
 

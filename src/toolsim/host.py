@@ -42,6 +42,7 @@ import dataclasses
 import hmac
 import logging
 import re
+import secrets
 import threading
 import uuid
 from collections import OrderedDict
@@ -78,6 +79,10 @@ class HostConfig:
     max_delay_s: float = 7 * 86400            # cap on virtual fault delays
     max_body_bytes: int = 10 * 1024 * 1024
     speed: float | None = None                # default clock: None = virtual (fast), 1 = real time, 60 = 60x
+    gateway_port: int | None = None           # also run the HTTPS gateway (real Google/GitHub clients) on this port
+    gateway_bind: str = "127.0.0.1"
+    gateway_passthrough: bool = True          # tunnel other hosts to the internet (False: refuse them)
+    ca_dir: Path | None = None                # where the gateway's CA lives (default ~/.toolsim/ca)
 
 
 def _valid_id(value: str | None, what: str) -> str | None:
@@ -94,6 +99,48 @@ class Host:
         self.snapshots: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.env_snapshots: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._lock = threading.RLock()
+        self.gateway_secret = self.config.token or secrets.token_hex(16)  # signs agents' API tokens
+        self.gateway: Any = None
+        if self.config.gateway_port is not None:
+            from .gateway import Gateway
+            self.gateway = Gateway(self, bind=self.config.gateway_bind, port=self.config.gateway_port,
+                                   ca_dir=self.config.ca_dir, passthrough=self.config.gateway_passthrough).start()
+
+    def credentials(self, base_url: str, *, run: EnvRun | None = None, instance: Instance | None = None,
+                    agent: str | None = None) -> dict[str, Any]:
+        """What an agent's real clients need: tokens, and (with the gateway) proxy and CA settings."""
+        from .api.http import mint
+        kw = {"run": run.id} if run is not None else {"instance": instance.id if instance else None}
+        google = mint(self.gateway_secret, agent=agent, **kw)
+        github = mint(self.gateway_secret, agent=agent, kind="github", **kw)
+        email = None
+        insts = ({s: run.instances[s] for s in run.env.agent_servers(agent)} if run is not None and agent
+                 else run.instances if run is not None else {instance.id: instance} if instance else {})
+        for server, i in insts.items():
+            if i.service.name in ("gmail", "calendar", "drive"):
+                who = run.env.identity_for(agent, server) if run is not None and agent else None
+                email = i.resolve_actor(who) if who else i.service.default_actor(i.state)
+                break
+        env = {"GH_TOKEN": github, "GITHUB_TOKEN": github, "GOG_ACCESS_TOKEN": google}
+        if email:
+            env["GOG_ACCOUNT"] = email
+        out: dict[str, Any] = {
+            "google_access_token": google, "github_token": github, "email": email,
+            "direct_base_url": f"{base_url}/gw/{{host}}",
+            "google_authorized_user": {"token": google, "refresh_token": google,
+                                       "token_uri": "https://oauth2.googleapis.com/token",
+                                       "client_id": "toolsim.apps.googleusercontent.com", "client_secret": "toolsim",
+                                       "scopes": ["https://mail.google.com/", "https://www.googleapis.com/auth/calendar",
+                                                  "https://www.googleapis.com/auth/drive",
+                                                  "https://www.googleapis.com/auth/spreadsheets",
+                                                  "https://www.googleapis.com/auth/documents",
+                                                  "https://www.googleapis.com/auth/contacts"],
+                                       "universe_domain": "googleapis.com", "account": email or ""},
+            "env": env}
+        if self.gateway is not None:
+            out["env"] = {**self.gateway.client_env(), **env}
+            out["ca_pem"] = self.gateway.ca.pem
+        return out
 
     # -- registry (all mutations and listings under the lock) -----------------------------
 
@@ -212,6 +259,8 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
     async def guard(request: Request, call_next: Any) -> Response:
         if request.url.path == "/healthz":
             return await call_next(request)
+        if request.url.path.startswith("/gw/"):  # the agents' API traffic carries its own signed tokens
+            return await call_next(request)
         length = request.headers.get("content-length")
         if length and length.isdigit() and int(length) > cfg.max_body_bytes:
             return JSONResponse({"detail": f"request body over {cfg.max_body_bytes} bytes"}, status_code=413)
@@ -304,7 +353,19 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
                 "time": {"mode": "realtime", "speed": run.clock.speed} if run.clock.realtime else {"mode": "virtual"},
                 "servers": {s: {"instance": i.id, "service": i.service.name, "version": i.version}
                             for s, i in run.instances.items()},
-                "agents": run.agent_configs(base)}
+                "agents": run.agent_configs(base),
+                "credentials": {(a or "default"): host.credentials(base, run=run, agent=a)
+                                for a in (run.env.agents or [None])}}
+
+    # -- real APIs (Google Workspace, GitHub), without the HTTPS gateway ------------------------
+
+    @app.api_route("/gw/{target}/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD"])
+    async def gateway_direct(target: str, path: str, request: Request) -> Response:
+        from .api.http import handle
+        body = await request.body()
+        result = await run_in_threadpool(handle, host, target, request.method, "/" + path,
+                                         request.url.query, dict(request.headers), body)
+        return Response(result.body, status_code=result.status, headers=result.headers)
 
     @app.post("/envs")
     def start_env(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, Any]:

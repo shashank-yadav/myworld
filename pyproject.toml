@@ -21,6 +21,11 @@ classifiers = [
 [project.scripts]
 toolsim = "toolsim.cli:main"
 
+[project.optional-dependencies]
+gateway = [
+    "cryptography>=42",
+]
+
 [tool.uv.build-backend]
 module-name = "toolsim"
 

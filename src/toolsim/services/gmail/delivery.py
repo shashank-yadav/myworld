@@ -8,7 +8,7 @@ from typing import Any
 
 from ...core.instance import Instance
 from ...core.tools import ToolError
-from .model import _addr, _store
+from .model import V1, _addr, _invalid, _not_found, _store
 from .search import _matches
 
 COMMON_DOMAINS = ["gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com"]
@@ -97,6 +97,34 @@ def _delay(v: Any) -> float:
     return float(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)]
 
 
+def _send(ctx: Instance, box: dict[str, Any], *, to: list[str], cc: list[str], bcc: list[str], subject: str,
+          body: str, html_body: str | None = None, attachments: list[dict[str, Any]] | None = None,
+          thread_id: str | None = None, sender: str | None = None, headers: dict[str, str] | None = None
+          ) -> dict[str, Any]:
+    """Send from ``box``: quota, address checks, the SENT copy, delivery to colleagues' mailboxes,
+    then bounces and replies (2026-09-25.1)."""
+    if not to and not cc and not bcc:
+        raise _invalid("Recipient address required")
+    if ctx.at_least(V1):
+        _check_quota(ctx, box, len(to) + len(cc) + len(bcc))
+    for a in [*to, *cc, *bcc]:
+        if "@" not in _addr(a):
+            raise _invalid(f"Invalid To header: {a}")
+    if thread_id and not any(m["threadId"] == thread_id for m in box["messages"].values()):
+        raise _not_found()
+    user = box["user"]
+    msg = _store(ctx, box, sender=sender or f"{user['name']} <{user['email']}>", to=to, cc=cc, bcc=bcc,
+                 subject=subject, body=body, html_body=html_body, labels=["SENT"], date=ctx.now(), thread_id=thread_id,
+                 attachments=attachments or [], headers=headers)
+    # mail to yourself lands in your inbox too
+    if user["email"].lower() in {_addr(a) for a in [*to, *cc]}:
+        msg["labelIds"] += ["INBOX", "UNREAD"]
+    _deliver(ctx, msg, box)  # colleagues in this world actually receive it
+    if ctx.at_least(V1):
+        _after_send(ctx, msg)
+    return msg
+
+
 def _deliver(ctx: Instance, sent: dict[str, Any], sender_box: dict[str, Any]) -> list[str]:
     """Put a copy of a sent message in every recipient mailbox that exists in this world.
     The copy keeps the RFC 822 Message-ID, lands in the recipient's thread for the same
@@ -111,7 +139,7 @@ def _deliver(ctx: Instance, sent: dict[str, Any], sender_box: dict[str, Any]) ->
         thread = next((m["threadId"] for m in box["messages"].values() if m["messageId"] in refs), None)
         copy_ = _store(ctx, box, sender=sent["from"], to=sent["to"], cc=sent["cc"], bcc=[], subject=sent["subject"],
                        body=sent["body"], html_body=sent.get("htmlBody"), labels=["INBOX", "UNREAD"], date=ctx.now(),
-                       thread_id=thread, attachments=[{k: a[k] for k in ("filename", "mimeType", "size")}
+                       thread_id=thread, attachments=[{k: a[k] for k in ("filename", "mimeType", "size", "data") if k in a}
                                                       for a in sent["attachments"]])
         copy_["messageId"] = sent["messageId"]
         _apply_filters(box, copy_, ctx)

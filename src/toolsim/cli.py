@@ -156,8 +156,14 @@ def cmd_serve(args: argparse.Namespace) -> None:
     logging.basicConfig(level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     config = HostConfig(token=token, allowed_origins=args.allow_origin or [],
                         env_dirs=[Path(d) for d in (args.env_dir or [])], max_instances=args.max_instances,
-                        max_hang_s=args.max_hang, speed=parse_time(args.time))
+                        max_hang_s=args.max_hang, speed=parse_time(args.time), gateway_port=args.gateway,
+                        gateway_bind=args.gateway_bind, gateway_passthrough=not args.no_passthrough,
+                        ca_dir=Path(args.ca_dir) if args.ca_dir else None)
     host = Host(config)
+    if host.gateway is not None:
+        print(f"gateway: HTTPS_PROXY={host.gateway.url}  CA={host.gateway.ca.cert_path}  "
+              f"(Google Workspace + GitHub APIs are simulated; "
+              f"{'other hosts tunnel through' if not args.no_passthrough else 'other hosts are refused'})")
     base = f"http://{args.host}:{args.port}"
     for path in args.env or []:
         env = Environment.load(path)
@@ -166,6 +172,10 @@ def cmd_serve(args: argparse.Namespace) -> None:
         for agent, cfg in run.agent_configs(base).items():
             print(f"\n[{agent}] task: {cfg['task']}")
             print(json.dumps({"mcpServers": cfg["mcpServers"]}, indent=2))
+            if host.gateway is not None:
+                creds = host.credentials(base, run=run, agent=agent)
+                print("env for real clients (gog, gh, Google/GitHub SDKs):")
+                print("\n".join(f"  export {k}={v}" for k, v in creds["env"].items()))
         print(f"\ngrade with: toolsim grade {path} --url {base}   (snapshot/fork: {base}/docs)")
     if token:
         print("auth: send 'Authorization: Bearer <token>' (or ?token=) on every request", flush=True)
@@ -221,6 +231,11 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--time", type=_time_arg, default=None,
                    help="clock for envs/instances that don't set one: virtual (default, fast), realtime, or a speed "
                         "like 60 (a simulated minute per real second)")
+    s.add_argument("--gateway", type=int, metavar="PORT",
+                   help="also run the HTTPS gateway: real clients (gog, gh, Google/GitHub SDKs) via HTTPS_PROXY")
+    s.add_argument("--gateway-bind", default="127.0.0.1")
+    s.add_argument("--no-passthrough", action="store_true", help="gateway refuses hosts it doesn't simulate")
+    s.add_argument("--ca-dir", help="where the gateway keeps its CA (default ~/.toolsim/ca)")
     s.set_defaults(fn=cmd_serve)
 
     s = sub.add_parser("stdio", help="serve one instance over stdio")

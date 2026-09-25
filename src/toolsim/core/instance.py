@@ -175,6 +175,7 @@ class CallResult:
     text: str
     is_error: bool
     data: Any = None
+    status: int = 200  # the HTTP status a REST client would see
 
 
 class Instance:
@@ -407,7 +408,7 @@ class Instance:
             self._actor = None
 
     def call(self, name: str, args: dict[str, Any] | None, *, agent: str | None = None,
-             as_: str | None = None) -> CallResult:
+             as_: str | None = None, tool: Tool | None = None) -> CallResult:
         """One tool call. ``agent`` names the calling agent (for attribution); ``as_`` is the
         identity it acts as (resolved per service; default: the service's default user)."""
         args = args or {}
@@ -425,7 +426,7 @@ class Instance:
             else:
                 self.run_due()
             with self._acting(actor):
-                result = self._call(name, args, agent)
+                result = self._call(name, args, agent, tool)
             if self.hooks and self.calls:
                 self.hooks.after_call(self, self.calls[-1])
             return result
@@ -460,7 +461,7 @@ class Instance:
             self._flush(before, actor if as_ else None)
             return result
 
-    def _call(self, name: str, args: dict[str, Any], agent: str | None) -> CallResult:
+    def _call(self, name: str, args: dict[str, Any], agent: str | None, tool: Tool | None = None) -> CallResult:
         with self.lock:
             self._clock.seq += 1
             record: dict[str, Any] = {"seq": len(self.calls) + 1, "global_seq": self._clock.seq,
@@ -468,9 +469,9 @@ class Instance:
                                       "args": copy.deepcopy(args), "committed": False, "fault": None,
                                       "agent": agent, "actor": self.actor}
             self.calls.append(record)
-            t = self.tools.get(name)
+            t = tool or self.tools.get(name)
             if t is None:
-                return self._finish(record, CallResult(f"Unknown tool: {name}", True))
+                return self._finish(record, CallResult(f"Unknown tool: {name}", True, status=404))
 
             fault = next((f for f in self.faults if f.matches(name) and f.should_fire(self.rng, self.clock, self.start_time)),
                          None)
@@ -486,15 +487,16 @@ class Instance:
                     raise TransportFault(status, f"<html><head><title>{status} {_REASONS.get(status, 'Error')}</title>"
                                                  f"</head><body><h1>{status} {_REASONS.get(status, 'Error')}</h1></body></html>")
                 if fault.kind not in ("timeout_after_commit", "latency", "truncated", "duplicate_commit"):
-                    payload = self._fault_payload(fault)
-                    return self._finish(record, CallResult(self.service.render(payload), True, payload))
+                    payload, status = self._fault_payload(fault)
+                    return self._finish(record, CallResult(self.service.render(payload), True, payload, status))
 
             before = None if t.read_only else _clone(self.state)
             try:
                 self.service.check_call(self, name, args)
-                value = t.fn(self, **validate_args(t, args))
+                run = (lambda: t.fn(self, args)) if t.raw else (lambda: t.fn(self, **validate_args(t, args)))
+                value = run()
                 if fault is not None and fault.kind == "duplicate_commit" and not t.read_only:
-                    t.fn(self, **validate_args(t, args))  # the proxy retried; the caller never knows
+                    run()  # the proxy retried; the caller never knows
                 record["committed"] = not t.read_only
                 if not t.read_only:
                     self._remember(before)
@@ -509,7 +511,7 @@ class Instance:
                 self._outbox = []
                 if before is not None:
                     self.state = before  # failed calls leave no partial writes
-                result = CallResult(self.service.render(e.payload), True, e.payload)
+                result = CallResult(self.service.render(e.payload), True, e.payload, e.status)
             except Exception as e:  # a bug or an input shape the fake didn't anticipate: fail like a real 500
                 self._outbox = []
                 if before is not None:
@@ -517,22 +519,22 @@ class Instance:
                 log.exception("tool %s.%s failed on args %r", self.service.name, name, args)
                 payload = self.service.error_shape(500, f"Internal error while handling {name}: {type(e).__name__}")
                 record["internal_error"] = f"{type(e).__name__}: {e}"
-                result = CallResult(self.service.render(payload), True, payload)
+                result = CallResult(self.service.render(payload), True, payload, 500)
 
             if fault is not None and fault.kind == "timeout_after_commit":
-                payload = self._fault_payload(fault)
-                result = CallResult(self.service.render(payload), True, payload)
+                payload, status = self._fault_payload(fault)
+                result = CallResult(self.service.render(payload), True, payload, status)
             return self._finish(record, result)
 
-    def _fault_payload(self, fault: Fault) -> Any:
+    def _fault_payload(self, fault: Fault) -> tuple[Any, int]:
         simple = {"not_found": (404, "Not Found"), "unavailable": (503, "Service Unavailable"),
                   "bad_gateway": (502, "Bad Gateway")}
         if fault.kind in simple:
             status, msg = simple[fault.kind]
-            return self.service.error_shape(status, msg)
+            return self.service.error_shape(status, msg), status
         if fault.kind == "server_error" and fault.status not in (None, 500):
-            return self.service.error_shape(fault.status, _REASONS.get(fault.status, "Server Error"))
-        return self.service.fault_error(fault)[0]
+            return self.service.error_shape(fault.status, _REASONS.get(fault.status, "Server Error")), fault.status
+        return self.service.fault_error(fault)
 
     def _finish(self, record: dict[str, Any], result: CallResult) -> CallResult:
         record["ok"] = not result.is_error

@@ -45,6 +45,7 @@ class Tool:
     params: dict[str, inspect.Parameter] = field(default_factory=dict)
     since: str | None = None   # first service version (date) that has this tool
     until: str | None = None   # first service version that no longer has it
+    raw: bool = False          # an API operation: fn(ctx, request) gets the request as is (see toolsim.api)
 
     def in_version(self, version: str) -> bool:
         v = version_key(version)

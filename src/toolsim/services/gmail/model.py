@@ -80,7 +80,7 @@ def _new_label(ctx: Instance, state: dict[str, Any], name: str, message_vis: str
 def _store(ctx: Instance, state: dict[str, Any], *, sender: str, to: list[str], cc: list[str], bcc: list[str],
            subject: str, body: str, labels: list[str], date: dt.datetime, thread_key: str | None = None,
            thread_id: str | None = None, attachments: list[dict[str, Any]] | None = None,
-           html_body: str | None = None) -> dict[str, Any]:
+           html_body: str | None = None, headers: dict[str, str] | None = None) -> dict[str, Any]:
     mid = ctx.hex(16)
     if thread_id is None:
         if thread_key and thread_key in state["_threads"]:
@@ -91,12 +91,17 @@ def _store(ctx: Instance, state: dict[str, Any], *, sender: str, to: list[str], 
                 state["_threads"][thread_key] = thread_id
     atts = [{"attachmentId": f"ANGjdJ{ctx.token(20, 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-')}",
              "filename": a.get("filename", "file"), "mimeType": a.get("mimeType", "application/octet-stream"),
-             "size": int(a.get("size", 1024))} for a in attachments or []]
+             "size": int(a.get("size", 1024)), **({"data": a["data"]} if a.get("data") else {})}
+            for a in attachments or []]
     msg = {"id": mid, "threadId": thread_id, "labelIds": list(dict.fromkeys(labels)), "from": sender, "to": to,
            "cc": cc, "bcc": bcc, "subject": subject, "body": body, "htmlBody": html_body,
            "date": format_datetime(date), "internalDate": _ms(date), "snippet": " ".join(body.split())[:140],
            "attachments": atts, "messageId": f"<{ctx.hex(24)}@mail.gmail.com>"}
+    if headers:  # In-Reply-To / References, as sent through the REST API
+        msg["headers"] = dict(headers)
     state["messages"][mid] = msg
+    state["_history"] = state.get("_history", 1000) + 1  # Gmail historyId: this mailbox changed
+    state.setdefault("_hist", {})[mid] = state["_history"]
     return msg
 
 
