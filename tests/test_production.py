@@ -11,7 +11,7 @@ import uvicorn
 from fastapi.testclient import TestClient
 
 from toolsim.core.instance import Instance
-from toolsim.env import Environment
+from toolsim.env import Environment, EnvRun
 from toolsim.host import Host, HostConfig, create_app
 from toolsim.importers import IMPORTERS
 from toolsim.services import get_service
@@ -94,7 +94,7 @@ def test_seed_files_stay_inside_the_env_directory(tmp_path):
     d.mkdir()
     (d / "e.yaml").write_text("name: e\nservers:\n  gmail: {seed_file: ../outside.yaml}\n")
     with pytest.raises(ValueError, match="inside the environment's directory"):
-        Environment.load(d / "e.yaml").instantiate()
+        EnvRun(Environment.load(d / "e.yaml"))
     (d / "bad.yaml").write_text("name: [unclosed\n")
     with pytest.raises(ValueError, match=r"bad.yaml: invalid YAML \(line"):
         Environment.load(d / "bad.yaml")

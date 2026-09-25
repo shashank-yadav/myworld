@@ -2,7 +2,7 @@ import pytest
 
 from toolsim.core.instance import Instance, Service
 from toolsim.core.tools import tool
-from toolsim.env import Environment
+from toolsim.env import Environment, EnvRun
 from toolsim.services import SERVICES, get_service
 from toolsim.versions import check_all, fingerprint
 
@@ -52,7 +52,7 @@ def test_versions_gate_tools_and_behavior():
 
 def test_environments_pin_versions():
     env = Environment.from_dict({"name": "e", "servers": {"gmail": {"version": "2026-09-25"}}})
-    assert env.instantiate()["gmail"].version == "2026-09-25"
+    assert EnvRun(env).instances["gmail"].version == "2026-09-25"
     with pytest.raises(ValueError, match="no version"):
         Environment.from_dict({"name": "e", "servers": {"gmail": {"version": "1999-01-01"}}})
     from toolsim.core import mcp

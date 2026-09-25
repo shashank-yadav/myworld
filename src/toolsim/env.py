@@ -195,14 +195,6 @@ class Environment:
     def faults_for(self, server: str) -> list[dict[str, Any]]:
         return [{k: v for k, v in f.items() if k != "server"} for f in self.faults if f["server"] == server]
 
-    def instantiate(self, prefix: str | None = None) -> dict[str, Instance]:
-        """One fresh, isolated instance per server (in-process)."""
-        from .services import get_service
-        return {s: Instance(get_service(self.service_for(s)), self.seed_for(s), rng_seed=self.rng_seed,
-                            faults=self.faults_for(s), instance_id=f"{prefix or self.name}-{s}",
-                            version=self.version_for(s))
-                for s in self.servers}
-
     def grade(self, worlds: dict[str, dict[str, Any]], answer: str | None = None) -> dict[str, Any]:
         """``worlds[server] = {"state": ..., "calls": [...]}``: the end of a run. ``answer`` is the
         agent's final answer, if any. ``score`` is the weighted share of checks passed; ``reward``
