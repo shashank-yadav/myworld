@@ -19,6 +19,7 @@ EXPORTS = {TYPES["doc"]: {"pdf": "application/pdf", "docx": "application/vnd.ope
 ROLES = ["reader", "commenter", "writer", "owner"]
 V1 = "2026-09-25.1"
 V2 = "2026-09-25.2"
+V3 = "2026-09-25.3"
 SEARCH_LAG = {"files": 60}  # seconds until Drive search sees new, renamed or edited files
 
 
@@ -88,3 +89,16 @@ def _line(f: dict[str, Any]) -> str:
     size = f["size"] if f["size"] is not None else "N/A"
     return (f'- Name: "{f["name"]}" (ID: {f["id"]}, Type: {f["mimeType"]}, Size: {size}, '
             f'Modified: {f["modifiedTime"]}) Link: {f["webViewLink"]}')
+
+
+def _mail_share(ctx: Instance, f: dict[str, Any], to: str, role: str, message: str | None) -> None:
+    """Google Drive's share notification (2026-09-25.3): it reaches their mailbox if Gmail is here."""
+    me = ctx.state["me"]
+    name = me.split("@")[0].replace(".", " ").title()
+    kind = {"application/vnd.google-apps.document": "Document", "application/vnd.google-apps.spreadsheet": "Spreadsheet",
+            "application/vnd.google-apps.presentation": "Presentation", FOLDER: "Folder"}.get(f["mimeType"], "File")
+    verb = {"reader": "view", "commenter": "comment on", "writer": "edit"}.get(role, "view")
+    ctx.notify(to, f"{name} (via Google Drive) <drive-shares-dm-noreply@google.com>",
+               f"{kind} shared with you: \"{f['name']}\"",
+               f"{name} ({me}) has invited you to {verb} the following {kind.lower()}:\n\n{f['name']}\n"
+               + (f"\n{message}\n" if message else "") + f"\nOpen: {f['webViewLink']}")

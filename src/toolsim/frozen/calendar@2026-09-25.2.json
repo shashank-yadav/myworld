@@ -1,0 +1,455 @@
+{
+ "behavior_sha256": "39262d95cd200becc12fae27ff1459ff9409a0d51640a2942b25229e00bf54e6",
+ "changelog": "A company calendar system: colleagues known by free/busy or as attendees are full calendar users (agents can act as them), and invitations, updates and cancellations are emailed to attendees when Gmail is in the same environment.",
+ "probe_calls": 24,
+ "service": "calendar",
+ "tools": [
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "List all available calendars",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+   },
+   "name": "list-calendars"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "List events from one or more calendars with date filtering",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "calendarId": {
+      "anyOf": [
+       {
+        "type": "string"
+       },
+       {
+        "items": {
+         "type": "string"
+        },
+        "type": "array"
+       }
+      ],
+      "default": "primary",
+      "description": "ID of the calendar(s) to list events from. Use 'primary' for the main calendar"
+     },
+     "timeMax": {
+      "description": "End time boundary (ISO 8601), e.g. 2026-09-29T00:00:00",
+      "type": "string"
+     },
+     "timeMin": {
+      "description": "Start time boundary (ISO 8601), e.g. 2026-09-22T00:00:00",
+      "type": "string"
+     },
+     "timeZone": {
+      "description": "Timezone for interpreting times without an offset (IANA name)",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "name": "list-events"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Get details of a specific event by ID",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "calendarId": {
+      "default": "primary",
+      "description": "ID of the calendar. Use 'primary' for the main calendar",
+      "type": "string"
+     },
+     "eventId": {
+      "description": "ID of the event to retrieve",
+      "type": "string"
+     }
+    },
+    "required": [
+     "eventId"
+    ],
+    "type": "object"
+   },
+   "name": "get-event"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Search for events in a calendar by text query",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "calendarId": {
+      "default": "primary",
+      "description": "ID of the calendar. Use 'primary' for the main calendar",
+      "type": "string"
+     },
+     "query": {
+      "description": "Free text search query (searches summary, description, location, attendees)",
+      "type": "string"
+     },
+     "timeMax": {
+      "description": "End time boundary (ISO 8601)",
+      "type": "string"
+     },
+     "timeMin": {
+      "description": "Start time boundary (ISO 8601)",
+      "type": "string"
+     },
+     "timeZone": {
+      "description": "Timezone (IANA name)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ],
+    "type": "object"
+   },
+   "name": "search-events"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Create a new calendar event",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "attendees": {
+      "description": "List of attendees, e.g. [{\"email\": \"john@acme.com\"}]",
+      "items": {
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "calendarId": {
+      "default": "primary",
+      "description": "ID of the calendar. Use 'primary' for the main calendar",
+      "type": "string"
+     },
+     "colorId": {
+      "description": "Color ID for the event (1-11)",
+      "type": "string"
+     },
+     "description": {
+      "description": "Description/notes for the event",
+      "type": "string"
+     },
+     "end": {
+      "description": "Event end time (ISO 8601), e.g. 2026-09-22T10:30:00",
+      "type": "string"
+     },
+     "location": {
+      "description": "Location of the event",
+      "type": "string"
+     },
+     "recurrence": {
+      "description": "Recurrence rules in RFC5545 format, e.g. [\"RRULE:FREQ=WEEKLY;COUNT=5\"]",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "sendUpdates": {
+      "default": "all",
+      "description": "Whether to send invitations",
+      "enum": [
+       "all",
+       "externalOnly",
+       "none"
+      ],
+      "type": "string"
+     },
+     "start": {
+      "description": "Event start time (ISO 8601), e.g. 2026-09-22T10:00:00",
+      "type": "string"
+     },
+     "summary": {
+      "description": "Title of the event",
+      "type": "string"
+     },
+     "timeZone": {
+      "description": "Timezone of the event start/end times (IANA name)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "summary",
+     "start",
+     "end"
+    ],
+    "type": "object"
+   },
+   "name": "create-event"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Update an existing calendar event, with recurring event modification scope support",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "attendees": {
+      "description": "Updated attendee list (replaces the existing list)",
+      "items": {
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "calendarId": {
+      "default": "primary",
+      "description": "ID of the calendar. Use 'primary' for the main calendar",
+      "type": "string"
+     },
+     "colorId": {
+      "description": "Updated color ID",
+      "type": "string"
+     },
+     "description": {
+      "description": "Updated description",
+      "type": "string"
+     },
+     "end": {
+      "description": "Updated end time (ISO 8601)",
+      "type": "string"
+     },
+     "eventId": {
+      "description": "ID of the event to update",
+      "type": "string"
+     },
+     "futureStartDate": {
+      "description": "Date from which changes apply (ISO 8601). Required when modificationScope is 'thisAndFollowing'",
+      "type": "string"
+     },
+     "location": {
+      "description": "Updated location",
+      "type": "string"
+     },
+     "modificationScope": {
+      "description": "Scope for recurring event modifications: 'thisEventOnly' (one instance), 'thisAndFollowing' (this and future instances) or 'all' (every instance). Defaults to 'all'",
+      "enum": [
+       "thisAndFollowing",
+       "all",
+       "thisEventOnly"
+      ],
+      "type": "string"
+     },
+     "originalStartTime": {
+      "description": "Original start time of the instance to modify (ISO 8601). Required when modificationScope is 'thisEventOnly'",
+      "type": "string"
+     },
+     "sendUpdates": {
+      "default": "all",
+      "description": "Whether to send update notifications",
+      "enum": [
+       "all",
+       "externalOnly",
+       "none"
+      ],
+      "type": "string"
+     },
+     "start": {
+      "description": "Updated start time (ISO 8601)",
+      "type": "string"
+     },
+     "summary": {
+      "description": "Updated title",
+      "type": "string"
+     },
+     "timeZone": {
+      "description": "Timezone for start/end (IANA name)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "eventId"
+    ],
+    "type": "object"
+   },
+   "name": "update-event"
+  },
+  {
+   "annotations": {
+    "destructiveHint": true,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Delete a calendar event",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "calendarId": {
+      "default": "primary",
+      "description": "ID of the calendar. Use 'primary' for the main calendar",
+      "type": "string"
+     },
+     "eventId": {
+      "description": "ID of the event to delete",
+      "type": "string"
+     },
+     "sendUpdates": {
+      "default": "all",
+      "description": "Whether to send cancellation notifications",
+      "enum": [
+       "all",
+       "externalOnly",
+       "none"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "eventId"
+    ],
+    "type": "object"
+   },
+   "name": "delete-event"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Respond to an event invitation (accept, decline, maybe, or no response)",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "calendarId": {
+      "default": "primary",
+      "description": "ID of the calendar. Use 'primary' for the main calendar",
+      "type": "string"
+     },
+     "eventId": {
+      "description": "ID of the event to respond to",
+      "type": "string"
+     },
+     "response": {
+      "description": "Your response",
+      "enum": [
+       "accepted",
+       "declined",
+       "tentative",
+       "needsAction"
+      ],
+      "type": "string"
+     }
+    },
+    "required": [
+     "eventId",
+     "response"
+    ],
+    "type": "object"
+   },
+   "name": "respond-to-event"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Query free/busy information for calendars, including other people's",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "calendars": {
+      "description": "Calendars to check, e.g. [{\"id\": \"primary\"}, {\"id\": \"john@acme.com\"}]",
+      "items": {
+       "type": "object"
+      },
+      "type": "array"
+     },
+     "timeMax": {
+      "description": "End of the interval (ISO 8601)",
+      "type": "string"
+     },
+     "timeMin": {
+      "description": "Start of the interval (ISO 8601)",
+      "type": "string"
+     },
+     "timeZone": {
+      "description": "Timezone (IANA name)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "calendars",
+     "timeMin",
+     "timeMax"
+    ],
+    "type": "object"
+   },
+   "name": "get-freebusy"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Get the current date and time in the calendar's timezone",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "timeZone": {
+      "description": "Timezone (IANA name). Defaults to the calendar's",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "name": "get-current-time"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "List available color IDs and their meanings for calendar events",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {},
+    "type": "object"
+   },
+   "name": "list-colors"
+  }
+ ],
+ "version": "2026-09-25.2"
+}

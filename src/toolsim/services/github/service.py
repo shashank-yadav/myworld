@@ -76,8 +76,10 @@ class GitHub(Service):
                     "    jitter = rng.random()\n    return min(30, 2 ** attempt) + jitter\n")
         return {
             "viewer": "alex-rivera",
-            "users": [{"login": "alex-rivera", "name": "Alex Rivera"}, {"login": "john-park", "name": "John Park"},
-                      {"login": "priya-shah", "name": "Priya Shah"}, {"login": "acme", "name": "Acme", "type": "Organization"}],
+            "users": [{"login": "alex-rivera", "name": "Alex Rivera", "email": "alex@acme.com"},
+                      {"login": "john-park", "name": "John Park", "email": "john@acme.com"},
+                      {"login": "priya-shah", "name": "Priya Shah", "email": "priya@acme.com"},
+                      {"login": "acme", "name": "Acme", "type": "Organization"}],
             "repos": [{
                 "name": "acme/api", "description": "Acme public API", "private": True,
                 "files": {"README.md": "# Acme API\n\nPayments and billing API.\n", "src/retry.py": retry_v1,

@@ -6,7 +6,7 @@ from typing import Any
 
 from ...core.instance import Instance
 from ...core.tools import action
-from .model import _err, _is_instance, _new_event, _parse
+from .model import _err, _is_instance, _mail_organizer, _new_event, _parse
 from .recurrence import _busy_spans, _lookup, _occurrences, _save_instance
 
 
@@ -43,6 +43,7 @@ def act_respond(ctx: Instance, summary: str, attendee: str, response: str) -> No
     if a is None:
         raise _err(400, f"{attendee} is not invited to {summary!r}")
     a["responseStatus"] = response
+    _mail_organizer(ctx, ev, a["email"], response)
     ev["updated"] = ctx.now().isoformat()
 
 
@@ -83,6 +84,7 @@ def act_auto_respond(ctx: Instance, event_id: str, attendee: str, response: str 
         busy = any(x < b and a < y for x, y in _busy_spans(s, email, ev.get("recurringEventId", ev["id"]), a, b, tz))
         policy = "decline" if busy else "accept"
     mine["responseStatus"] = {"accept": "accepted", "decline": "declined", "tentative": "tentative"}.get(policy, policy)
+    _mail_organizer(ctx, ev, email, mine["responseStatus"])
     if _is_instance(ev):
         _save_instance(ctx, ev)
     else:

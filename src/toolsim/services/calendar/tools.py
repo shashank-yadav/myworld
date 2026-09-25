@@ -16,6 +16,8 @@ from .model import (
     _cal,
     _err,
     _is_instance,
+    _mail_attendees,
+    _mail_organizer,
     _new_event,
     _on_calendar,
     _parse,
@@ -128,6 +130,7 @@ def create_event(ctx: Instance,
     if sendUpdates != "none" and ev.get("attendees"):
         ev["invitationsSent"] = [a["email"] for a in ev["attendees"] if a["email"] != ctx.actor]
     _schedule_responses(ctx, ev, [a["email"] for a in ev.get("attendees", [])])
+    _mail_attendees(ctx, ev, "invite", sendUpdates)
     return {"event": _view(ctx, ev)}
 
 
@@ -257,7 +260,12 @@ def update_event_v1(ctx: Instance,
     else:
         target = ev
     had = {a["email"] for a in target.get("attendees", [])}
+    before = (target["start"], target["end"], target.get("summary"), target.get("location"))
     _apply_update(target, tz, start, end, fields, attendees)
+    new = {a["email"] for a in target.get("attendees", [])} - had
+    if (target["start"], target["end"], target.get("summary"), target.get("location")) != before:
+        _mail_attendees(ctx, target, "update", sendUpdates, only=had)
+    _mail_attendees(ctx, target, "invite", sendUpdates, only=new)
     if _is_instance(target):
         _save_instance(ctx, target)
     else:
@@ -292,6 +300,7 @@ def delete_event(ctx: Instance,
         ev["hiddenFor"] = [*ev.get("hiddenFor", []), cid]
     else:
         ev["status"] = "cancelled"
+        _mail_attendees(ctx, ev, "cancel", sendUpdates)
     if _is_instance(ev):
         _save_instance(ctx, ev)  # deleting one instance of a series leaves the rest
     else:
@@ -313,6 +322,7 @@ def respond_to_event(ctx: Instance,
     if mine.get("organizer"):
         raise _err(400, "The organizer cannot respond to their own event.", "organizerResponse")
     mine["responseStatus"] = response
+    _mail_organizer(ctx, ev, me, response)
     if _is_instance(ev):
         _save_instance(ctx, ev)
     else:

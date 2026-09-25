@@ -6,7 +6,7 @@ import datetime as dt
 from typing import Any
 
 from ...core.instance import Instance, Service
-from .model import GRADING_DAYS, POLICIES, V1, _delay, _new_event, _on_calendar, _parse
+from .model import GRADING_DAYS, POLICIES, V1, V2, _delay, _new_event, _on_calendar, _parse
 from .recurrence import _occurrences
 
 
@@ -17,7 +17,10 @@ class Calendar(Service):
 
     versions = {"2026-09-25": "Initial release: 11 tools modeled on nspady/google-calendar-mcp.",
                 V1: "Recurring events expand into instances (RRULE/EXDATE), modificationScope on updates, "
-                    "per-instance deletes/responses, and colleagues who answer invites on their own."}
+                    "per-instance deletes/responses, and colleagues who answer invites on their own.",
+                V2: "A company calendar system: colleagues known by free/busy or as attendees are full calendar "
+                    "users (agents can act as them), and invitations, updates and cancellations are emailed "
+                    "to attendees when Gmail is in the same environment."}
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -55,6 +58,11 @@ class Calendar(Service):
             c("create-event", {"summary": "bad", "start": "2026-09-22T10:00:00", "end": "2026-09-22T11:00:00",
                                "recurrence": ["RRULE:FREQ=HOURLYISH"]})
             c("update-event", {"eventId": sid, "modificationScope": "thisEventOnly", "summary": "x"})
+        if ctx.at_least(V2):
+            c("list-events", {"timeMin": "2026-09-21T00:00:00", "timeMax": "2026-09-26T00:00:00"}, as_="priya@acme.com")
+            r = c("create-event", {"summary": "Pairing", "start": "2026-09-24T15:00:00", "end": "2026-09-24T16:00:00",
+                                   "attendees": [{"email": "alex@acme.com"}]}, as_="john@acme.com")
+            c("respond-to-event", {"eventId": r.data["event"]["id"], "response": "accepted"})
 
     def default_seed(self) -> dict[str, Any]:
         return {
@@ -92,8 +100,18 @@ class Calendar(Service):
             state["calendars"][email] = {"id": email, "summary": person.get("name", email),
                                          "timeZone": person.get("timeZone", tz), "acl": {email: "owner"},
                                          "domainRole": "freeBusyReader", "person": True}
+        domains = {state["default"].split("@")[1], *seed.get("domains", [])}
+
+        def add_person(email: str, name: str | None = None) -> None:
+            state["people"][email] = {"email": email, "name": name or email.split("@")[0].replace(".", " ").title()}
+            state["calendars"][email] = {"id": email, "summary": state["people"][email]["name"], "timeZone": tz,
+                                         "acl": {email: "owner"}, "domainRole": "freeBusyReader", "person": True}
+
         for c in seed.get("calendars", []):
             cid = c["id"].lower()
+            if ctx.at_least(V2) and cid not in state["calendars"] and "@" in cid and not cid.startswith("team") \
+                    and cid.split("@")[1] in domains:
+                add_person(cid, c.get("summary"))  # a colleague: a full calendar user, whose busy blocks stay
             if cid in state["calendars"]:  # a colleague who is also a person here: keep the real calendar
                 state["busy"][cid] = [{"start": b["start"], "end": b["end"]} for b in c.get("busy", [])]
                 continue
@@ -116,6 +134,12 @@ class Calendar(Service):
             organizer = (e.get("organizer") or state["default"]).lower()
             cid = e.get("calendarId", "primary")
             _new_event(ctx, state, organizer if cid == "primary" else cid, e, actor=organizer)
+        if ctx.at_least(V2):  # colleagues invited to seeded events are calendar users too (seeding sends no mail)
+            state["_v2"] = True
+            for ev in list(state["events"].values()):
+                for a in ev.get("attendees", []):
+                    if a["email"] not in state["people"] and a["email"].split("@")[1] in domains:
+                        add_person(a["email"])
         return state
 
     def default_actor(self, state: dict[str, Any]) -> str:

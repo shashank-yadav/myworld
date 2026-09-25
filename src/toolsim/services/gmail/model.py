@@ -10,6 +10,7 @@ from ...core.instance import Instance
 from ...core.tools import ToolError
 
 V1 = "2026-09-25.1"
+V2 = "2026-09-25.2"
 
 SYSTEM_LABELS = ["INBOX", "SENT", "DRAFT", "SPAM", "TRASH", "UNREAD", "STARRED", "IMPORTANT",
                  "CATEGORY_PERSONAL", "CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS", "CATEGORY_UPDATES", "CATEGORY_FORUMS"]

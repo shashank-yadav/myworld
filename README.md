@@ -184,7 +184,9 @@ servers:
   github: {noise: {issues: 60, pulls: 4}}
   jira: {noise: {issues: 80}}
   drive: {noise: {files: 50}}            # `noise: true` = realistic defaults
-ambient: {hours: 8, gmail: 6, slack: 20, github: 2, jira: 3, calendar: 1}   # events per hour
+  linear: {noise: {issues: 40}}
+  notion: {noise: {pages: 30, rows: 10}}
+ambient: {hours: 8, gmail: 6, slack: 20, github: 2, jira: 3, calendar: 1, linear: 2, notion: 1}   # events per hour
 ```
 
 - **Distractors:** the noise includes near-duplicates of the seeded items ("Q4 budget (old)", an
@@ -192,6 +194,17 @@ ambient: {hours: 8, gmail: 6, slack: 20, github: 2, jira: 3, calendar: 1}   # ev
 - **Seeded:** everything comes from `rng_seed`.
 - **Safe for checks:** seeded items keep their ids and numbers, generated people are new, and
   background activity only touches generated items.
+- **One company:** the generated colleagues are the same people in every tool, so an agent can act
+  as any of them anywhere.
+
+### One company across tools
+
+With Gmail in the environment, other tools' emails land in the recipient's mailbox:
+- Calendar invitations, updates, cancellations (honoring `sendUpdates`) and RSVP replies.
+- Drive share notifications.
+
+Everyone at the company has a mailbox, a calendar and a My Drive, so a second agent `as: john@acme.com`
+reads the invite Alex sent and answers it. A failed call sends nothing.
 
 ### The world moves on its own
 

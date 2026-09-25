@@ -86,7 +86,8 @@ def test_two_agents_schedule_a_meeting(world):
     assert report["passed"], report
 
     timeline = c.get("/envs/w/calls").json()["calls"]
-    assert [x["global_seq"] for x in timeline] == list(range(1, len(timeline) + 1))
+    seqs = [x["global_seq"] for x in timeline]
+    assert seqs == sorted(set(seqs)), "one ordering across servers (world events, like invite emails, take numbers too)"
     assert [x["agent"] for x in timeline][:4] == ["alex", "alex", "john", "john"]
     assert {x["actor"] for x in timeline if x["agent"] == "john"} == {"john@acme.com"}
     times = [x["at"] for x in timeline]

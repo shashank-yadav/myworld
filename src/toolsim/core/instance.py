@@ -88,6 +88,9 @@ class Service:
         """A fixed script of representative calls on the default world. Its results are frozen per
         version (see toolsim.versions), so any behavior change shows up as a changed fingerprint."""
 
+    def check_call(self, ctx: Instance, tool: str, args: dict[str, Any]) -> None:
+        """Checks every call must pass before its tool runs (raise ToolError to refuse it)."""
+
     def default_seed(self) -> dict[str, Any]:
         """A small, realistic world used when an environment doesn't provide one."""
         return {}
@@ -214,9 +217,11 @@ class Instance:
             self.events: list[dict[str, Any]] = []  # world events applied to this instance
             self.pending: list[dict[str, Any]] = []  # scheduled world actions (see schedule())
             self.history: list[tuple[str, Any]] = []  # (time of a write, state before it), for lagging search
+            self._outbox: list[dict[str, Any]] = []  # notifications raised by the current call (see notify())
             self.faults = parse_faults(self.fault_specs)
             try:
                 self.state = self.service.initial_state(copy.deepcopy(self.seed), self)
+                self._outbox = []  # the seeded world is the starting point: seeding notifies nobody
             except ToolError as e:
                 raise ValueError(f"invalid seed for {self.service.name}: {self.service.render(e.payload)}") from None
             except (KeyError, TypeError, AttributeError, IndexError, ValueError) as e:
@@ -337,6 +342,19 @@ class Instance:
     def advance(self, seconds: float) -> None:
         self.clock += dt.timedelta(seconds=seconds)
 
+    def notify(self, to: str, sender: str, subject: str, body: str, labels: list[str] | None = None) -> None:
+        """An email this service sends someone (an invitation, a share). In an environment that
+        also has Gmail, it lands in their mailbox; alone, it goes nowhere. Sent only if the current
+        call succeeds."""
+        self._outbox.append({"to": to.lower(), "sender": sender, "subject": subject, "body": body,
+                             "labels": labels or []})
+
+    def _flush(self) -> None:
+        out, self._outbox = self._outbox, []
+        if out and self.hooks is not None and hasattr(self.hooks, "deliver"):
+            for n in out:
+                self.hooks.deliver(self, n)
+
     def tick(self) -> None:
         """Bring the world up to date: in realtime mode, let wall time pass and fire what's due.
         (Calls do this themselves; readers like graders call it first.)"""
@@ -418,12 +436,15 @@ class Instance:
                 try:
                     result = act.fn(self, **(params or {}))
                 except ToolError as e:
+                    self._outbox = []
                     raise ValueError(f"{self.service.name}.{name}: {self.service.render(e.payload)}") from None
                 except TypeError as e:
+                    self._outbox = []
                     raise ValueError(f"{self.service.name}.{name}: {e}") from None
             self._clock.seq += 1
             self.events.append({"global_seq": self._clock.seq, "at": self.clock.isoformat(), "event": name,
                                 "params": copy.deepcopy(params or {}), "as": actor, "source": source})
+            self._flush()
             return result
 
     def _call(self, name: str, args: dict[str, Any], agent: str | None) -> CallResult:
@@ -457,21 +478,25 @@ class Instance:
 
             before = None if t.read_only else _clone(self.state)
             try:
+                self.service.check_call(self, name, args)
                 value = t.fn(self, **validate_args(t, args))
                 if fault is not None and fault.kind == "duplicate_commit" and not t.read_only:
                     t.fn(self, **validate_args(t, args))  # the proxy retried; the caller never knows
                 record["committed"] = not t.read_only
                 if not t.read_only:
                     self._remember(before)
+                self._flush()
                 result = CallResult(self.service.render(value), False, value)
                 if fault is not None and fault.kind == "truncated":
                     cut = max(1, int(len(result.text) * 0.6))
                     result = CallResult(result.text[:cut], False, result.text[:cut])
             except ToolError as e:
+                self._outbox = []
                 if before is not None:
                     self.state = before  # failed calls leave no partial writes
                 result = CallResult(self.service.render(e.payload), True, e.payload)
             except Exception as e:  # a bug or an input shape the fake didn't anticipate: fail like a real 500
+                self._outbox = []
                 if before is not None:
                     self.state = before
                 log.exception("tool %s.%s failed on args %r", self.service.name, name, args)

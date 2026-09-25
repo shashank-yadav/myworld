@@ -13,9 +13,11 @@ def generate(seed: dict[str, Any], cfg: dict[str, Any], rng_seed: int, now: str)
     seed = copy.deepcopy(seed)
     rng = _rng(rng_seed, "github")
     users = seed.setdefault("users", [])
-    crowd = people(rng_seed, "users.noreply.github.com", int(cfg.get("people", 10)), {u.get("name", "") for u in users})
+    domain = next((u["email"].split("@")[1] for u in users if u.get("email")), "acme.com")
+    crowd = people(rng_seed, domain, int(cfg.get("people", 10)), {u.get("name", "") for u in users})
     known = {u["login"] for u in users}
-    users.extend({"login": c["login"], "name": c["name"], "noise": True} for c in crowd if c["login"] not in known)
+    users.extend({"login": c["login"], "name": c["name"], "email": c["email"], "noise": True}
+                 for c in crowd if c["login"] not in known)
     logins = [c["login"] for c in crowd] + ["dependabot[bot]"]
     users.append({"login": "dependabot[bot]", "name": "dependabot[bot]"})
     repos = seed.get("repos") or []

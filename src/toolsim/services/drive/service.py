@@ -6,8 +6,15 @@ import re
 from typing import Any
 
 from ...core.instance import Instance, Service
-from .model import FOLDER, SEARCH_LAG, TYPES, V1, V2, _grant, _new_file
+from .model import FOLDER, SEARCH_LAG, TYPES, V1, V2, V3, _err, _grant, _new_file
 from .sheets import _new_sheet, _sync_content
+
+
+def _my_drive(ctx: Instance, state: dict[str, Any], email: str) -> None:
+    if email not in state["roots"]:
+        root = _new_file(ctx, state, "My Drive", FOLDER, None, owner=email)
+        root["parents"] = []
+        state["roots"][email] = root["id"]
 
 
 class Drive(Service):
@@ -17,7 +24,18 @@ class Drive(Service):
     versions = {"2026-09-25": "Initial release: 12 Drive tools modeled on taylorwilsdon/google_workspace_mcp.",
                 V1: "Sheets (6 tools: cells, A1 ranges, formulas, grid limits) and Docs (5 tools) from the same server.",
                 V2: "Search is eventually consistent: new, renamed and edited files reach search_drive_files, "
-                    "search_docs and list_spreadsheets about a minute later (listing a folder is immediate)."}
+                    "search_docs and list_spreadsheets about a minute later (listing a folder is immediate).",
+                V3: "A company Drive: colleagues who own or can access files have their own My Drive (agents can "
+                    "act as them), shares email the recipient when Gmail is in the same environment, and "
+                    "user_google_email must be the signed-in user (another address has no credentials here)."}
+
+    def check_call(self, ctx: Instance, tool: str, args: dict[str, Any]) -> None:
+        if ctx.state.get("_v3"):
+            _my_drive(ctx, ctx.state, ctx.state["me"])  # a colleague's first visit
+        who = args.get("user_google_email")
+        if ctx.state.get("_v3") and isinstance(who, str) and who.strip() and who.strip().lower() != ctx.state["me"]:
+            raise _err(401, f"No valid credentials for {who.strip()}. This session is signed in as {ctx.state['me']}; "
+                            f"omit user_google_email or pass {ctx.state['me']}.", "authError")
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -68,6 +86,13 @@ class Drive(Service):
             c("list_drive_items", {})
             ctx.advance(90)
             c("search_drive_files", {"query": "name contains 'incident'"})
+        if ctx.at_least(V3):
+            q4 = next(x for x in ctx.state["files"].values() if x["name"] == "Q4 plan")
+            c("manage_drive_access", {"file_id": q4["id"], "action": "grant", "share_with": "john@acme.com",
+                                      "role": "commenter", "email_message": "Thoughts?"})
+            c("get_drive_file_content", {"file_id": q4["id"]}, as_="john@acme.com")
+            c("list_drive_items", {}, as_="john@acme.com")
+            c("get_drive_file_content", {"file_id": q4["id"], "user_google_email": "john@acme.com"})
 
     def default_seed(self) -> dict[str, Any]:
         return {
@@ -120,13 +145,21 @@ class Drive(Service):
                 _sync_content(nf)
             if owner != me:
                 _grant(ctx, state, nf, "user", f.get("shared_role", "reader"), me)
+        if ctx.at_least(V3):  # everyone at the company who appears in Drive has a My Drive
+            state["_v3"] = True
+            for f in list(state["files"].values()):
+                for p in f["permissions"]:
+                    email = (p.get("emailAddress") or "").lower()
+                    if email.endswith("@" + state["domain"]):
+                        _my_drive(ctx, state, email)
         return state
 
     actor_key = "me"
 
     def resolve_actor(self, state: dict[str, Any], identity: str) -> str:
         email = identity.strip().lower()
-        if email not in state.get("roots", {}) and email != state["me"]:
+        colleague = state.get("_v3") and email.endswith("@" + state["domain"])  # everyone at the company has a Drive
+        if email not in state.get("roots", {}) and email != state["me"] and not colleague:
             raise ValueError(f"no Drive user {identity} in this environment")
         return email
 

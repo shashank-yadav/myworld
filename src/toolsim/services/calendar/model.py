@@ -11,6 +11,7 @@ from ...core.instance import Instance
 from ...core.tools import ToolError
 
 V1 = "2026-09-25.1"
+V2 = "2026-09-25.2"
 MAX_INSTANCES = 730  # a recurring series is expanded at most this far
 GRADING_DAYS = 180  # graders look for conflicts this far into a recurring series
 POLICIES = ("accept", "decline", "tentative", "if_free")
@@ -117,3 +118,60 @@ def _delay(v: Any) -> float:
     if not m:
         raise ValueError(f"invalid delay {v!r} (e.g. 30s, 10m, 2h)")
     return float(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)]
+
+
+# -- email notifications (2026-09-25.2) -------------------------------------------------------
+
+def _when_text(ev: dict[str, Any], tz: str) -> str:
+    """Google's style: 'Tue Sep 22, 2026 10am - 10:30am (PDT)'."""
+    zone = ZoneInfo(tz)
+    s, e = _parse(ev["start"], tz).astimezone(zone), _parse(ev["end"], tz).astimezone(zone)
+
+    def hm(t: dt.datetime) -> str:
+        h = t.hour % 12 or 12
+        return f"{h}{'' if t.minute == 0 else f':{t.minute:02d}'}{'am' if t.hour < 12 else 'pm'}"
+    return f"{s.strftime('%a %b')} {s.day}, {s.year} {hm(s)} - {hm(e)} ({s.tzname()})"
+
+
+def _person(state: dict[str, Any], email: str) -> str:
+    name = (state["people"].get(email) or {}).get("name")
+    return f"{name} <{email}>" if name else email
+
+
+def _mail_attendees(ctx: Instance, ev: dict[str, Any], kind: str, send_updates: str | None,
+                    only: set[str] | None = None) -> None:
+    """Invitation / update / cancellation emails to the attendees, as Google Calendar sends them."""
+    s = ctx.state
+    if not s.get("_v2") or send_updates == "none" or ev.get("status") == "cancelled" and kind != "cancel":
+        return
+    domains = {s["default"].split("@")[1]}
+    organizer = ev["organizer"]["email"]
+    when = _when_text(ev, s["timeZone"])
+    title = {"invite": "Invitation", "update": "Updated invitation", "cancel": "Canceled event"}[kind]
+    for a in ev.get("attendees", []):
+        to = a["email"]
+        if to in (organizer, ctx.actor) or (only is not None and to not in only):
+            continue
+        if send_updates == "externalOnly" and to.split("@")[1] in domains:
+            continue
+        body = {"invite": f"{_person(s, organizer).split(' <')[0]} has invited you to this event.",
+                "update": "This event has been changed.",
+                "cancel": "This event has been canceled and removed from your calendar."}[kind]
+        ctx.notify(to, _person(s, organizer), f"{title}: {ev.get('summary', '(No title)')} @ {when} ({to})",
+                   f"{body}\n\n{ev.get('summary', '(No title)')}\nWhen: {when}\n"
+                   + (f"Where: {ev['location']}\n" if ev.get("location") else "")
+                   + "Who: " + ", ".join(x["email"] for x in ev.get("attendees", []))
+                   + (f"\n\nReply for {to}: Yes / No / Maybe" if kind != "cancel" else "")
+                   + f"\nView event: {ev.get('htmlLink', '')}")
+
+
+def _mail_organizer(ctx: Instance, ev: dict[str, Any], attendee: str, response: str) -> None:
+    """The organizer hears back when someone answers (Accepted: / Declined: / Tentatively Accepted:)."""
+    s = ctx.state
+    organizer = ev["organizer"]["email"]
+    if not s.get("_v2") or organizer == attendee or response == "needsAction":
+        return
+    verb = {"accepted": "Accepted", "declined": "Declined", "tentative": "Tentatively Accepted"}[response]
+    who = _person(s, attendee)
+    ctx.notify(organizer, who, f"{verb}: {ev.get('summary', '(No title)')} @ {_when_text(ev, s['timeZone'])}",
+               f"{who.split(' <')[0]} has {verb.lower()} this invitation.")

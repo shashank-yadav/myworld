@@ -6,7 +6,7 @@ from email.utils import parseaddr
 from typing import Any
 
 from ...core.instance import Instance, Service
-from .model import V1, _addr, _list, _mb, _new_mailbox
+from .model import V1, V2, _addr, _list, _mb, _new_mailbox
 
 
 class Gmail(Service):
@@ -15,7 +15,9 @@ class Gmail(Service):
     description = "Simulated Gmail mailbox. Behaves like the Gmail MCP server; nothing is really sent."
 
     versions = {"2026-09-25": "Initial release: 19 tools modeled on GongRzhe/Gmail-MCP-Server.",
-                V1: "Bounces for unknown/typo'd recipients, out-of-office and colleague auto-replies, daily send quota."}
+                V1: "Bounces for unknown/typo'd recipients, out-of-office and colleague auto-replies, daily send quota.",
+                V2: "A company mail system: every known address at the company's domains has a mailbox, so any "
+                    "colleague can have an agent and mail between colleagues lands in both inboxes."}
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -39,6 +41,11 @@ class Gmail(Service):
             c("send_email", {"to": ["priya@acme.co"], "subject": "Typo domain", "body": "Hi"})
             ctx.advance(600)
             c("search_emails", {"query": "from:mailer-daemon"})
+        if ctx.at_least(V2):
+            c("send_email", {"to": ["john@acme.com"], "subject": "Lunch?", "body": "Tacos at noon?"})
+            c("search_emails", {"query": "subject:lunch"}, as_="john@acme.com")
+            c("send_email", {"to": ["alex@acme.com"], "subject": "Re: Lunch?", "body": "Yes!"}, as_="john@acme.com")
+            c("search_emails", {"query": "from:john subject:lunch"})
 
     def default_seed(self) -> dict[str, Any]:
         return {
@@ -87,6 +94,11 @@ class Gmail(Service):
         state["_directory"] = sorted(known)
         state["_names"] = names
         state["_domains"] = sorted({a.split("@")[1] for a in state["mailboxes"]} | set(seed.get("domains", [])))
+        if ctx.at_least(V2):  # everyone at the company has a mailbox
+            for addr in state["_directory"]:
+                if addr.rsplit("@", 1)[-1] in state["_domains"] and addr not in state["mailboxes"]:
+                    user = {"email": addr, "name": names.get(addr) or addr.split("@")[0].replace(".", " ").title()}
+                    state["mailboxes"][addr] = _new_mailbox(ctx, {}, user)
         state["_auto_replies"] = list(seed.get("auto_replies", []))
         state["_daily_send_limit"] = int(seed.get("daily_send_limit", 2000))
         state["_ooo_sent"] = []

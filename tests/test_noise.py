@@ -4,11 +4,12 @@ import json
 
 import pytest
 
+from toolsim import noise
 from toolsim.env import Environment, EnvRun
 from toolsim.services import get_service
 
-ALL = ["gmail", "slack", "calendar", "github", "jira", "drive"]
-AMBIENT = {"hours": 8, "gmail": 6, "slack": 20, "github": 2, "jira": 3, "calendar": 1}
+ALL = ["gmail", "slack", "calendar", "github", "jira", "drive", "linear", "notion"]
+AMBIENT = {"hours": 8, "gmail": 6, "slack": 20, "github": 2, "jira": 3, "calendar": 1, "linear": 2, "notion": 1}
 
 
 def run_of(rng_seed=0, servers=ALL, ambient=None, **cfg):
@@ -33,6 +34,8 @@ def test_volume_is_realistic():
     assert len(i["jira"].state["issues"]) > 60
     assert len(i["drive"].state["files"]) > 40
     assert len(i["calendar"].state["events"]) > 20
+    assert len(i["linear"].state["issues"]) > 30
+    assert len(i["notion"].state["pages"]) > 25
 
 
 def test_seeded_task_items_are_untouched():
@@ -82,6 +85,9 @@ def test_ambient_activity_keeps_the_world_moving_on_generated_items_only():
     kinds = {e["event"] for inst in run.instances.values() for e in inst.events}
     assert {"deliver_email", "post_message", "add_comment", "add_event"} <= kinds
     assert len(gh.state["repos"]["acme/api"]["comments"][4]) == 0, "the seeded PR gets no ambient comments"
+    assert {e["event"] for e in run.instances["linear"].events} == {"add_comment"}
+    assert {e["event"] for e in run.instances["notion"].events} == {"edit_page"}
+    assert not {e["params"]["author"] for e in run.instances["linear"].events} & {"john@acme.com", "priya@acme.com"}
 
 
 def test_ambient_is_part_of_snapshots_and_varies_by_seed():
@@ -110,6 +116,6 @@ def test_careful_agent_still_passes_in_a_noisy_world():
 
 def test_bad_specs():
     with pytest.raises(ValueError, match="noise isn't available"):
-        run_of(servers=["linear"])
+        noise.apply("mystery", {}, True, 0, "")
     with pytest.raises(ValueError, match="ambient: unknown server"):
         run_of(servers=["gmail"], ambient={"slack": 3})

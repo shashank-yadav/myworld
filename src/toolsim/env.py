@@ -501,6 +501,14 @@ class EnvRun:
         self.instances[ev["server"]].apply_action(ev["action"], ev.get("params"), as_=ev.get("as"),
                                                   source=f"{ev.get('name') or 'event ' + str(n + 1)} ({source})")
 
+    def deliver(self, source: Instance, n: dict[str, Any]) -> None:
+        """Route a service's notification email to the recipient's mailbox, in any Gmail here."""
+        for inst in self.instances.values():
+            if inst is not source and inst.service.name == "gmail" and n["to"] in inst.state["mailboxes"]:
+                inst.apply_action("deliver_email", {k: n[k] for k in ("to", "sender", "subject", "body")}
+                                  | ({"labels": n["labels"]} if n["labels"] else {}),
+                                  source=f"notification from {self._server_of[id(source)]}", advance=False)
+
     def tick(self) -> None:
         """Bring the world up to date (realtime mode: wall time passes, due events fire)."""
         with self.lock:

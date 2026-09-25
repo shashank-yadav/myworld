@@ -7,7 +7,7 @@ from typing import Annotated, Any, Literal
 
 from ...core.instance import Instance
 from ...core.tools import tool
-from .model import EXPORTS, FOLDER, TYPES, _err, _file, _grant, _iso, _line, _my_role, _new_file
+from .model import EXPORTS, FOLDER, TYPES, _err, _file, _grant, _iso, _line, _mail_share, _my_role, _new_file
 from .query import _drive_query, _eval
 
 EMAIL = Annotated[str | None, "The user's Google email address (optional in single-user mode)"]
@@ -244,6 +244,8 @@ def manage_drive_access(ctx: Instance,
         if existing and existing["role"] == "owner":
             raise _err(400, f"{share_with} already owns this file.", "invalidSharingRequest")
         _grant(ctx, s, f, "user", role or "reader", share_with)
+        if send_notification and s.get("_v3"):
+            _mail_share(ctx, f, share_with, role or "reader", email_message)
         note = " and notified them by email" if send_notification else ""
         return f"Granted {role} access on '{f['name']}' to {share_with}{note}."
     if existing is None:

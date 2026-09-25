@@ -4,6 +4,16 @@ Service behavior is versioned separately by date (`toolsim versions`); this file
 
 ## Unreleased
 
+- **One company across tools** (new service versions; older ones unchanged):
+  - Gmail `2026-09-25.2`: every company address has a mailbox.
+  - Calendar `2026-09-25.2`: colleagues are full calendar users; invitations, updates, cancellations
+    and RSVPs are emailed through any Gmail in the environment.
+  - Drive `2026-09-25.3`: everyone at the company has a My Drive; shares email the recipient;
+    `user_google_email` must be the signed-in user.
+  - GitHub users have company emails, so `as: alex@acme.com` works everywhere.
+- **Noise and ambient activity for Linear and Notion**; generated colleagues exist in every tool.
+- **Multi-tool tests** (`tests/test_multitool.py`).
+
 - **Parallel episodes:** `toolsim.rl.EnvPool` (worker processes, batched reset/step with skips) and
   `toolsim bench` (reference rollouts; ~340 episodes/s on 8 workers).
 - **Tasks:** 20 families; answer checks guard against stuffing (`max_len`, `not`); `calls: "*"` for
