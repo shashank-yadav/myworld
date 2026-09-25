@@ -141,6 +141,9 @@ def _instance(ev: dict[str, Any], orig: dt.datetime, tz: str) -> dict[str, Any]:
     inst = {k: copy.deepcopy(v) for k, v in ev.items() if k not in ("recurrence", "_exceptions")}
     inst.update(id=f"{ev['id']}_{key}", recurringEventId=ev["id"], originalStartTime=_when(orig, etz),
                 start=_when(orig, etz), end=_when(orig + length, etz))
+    if "date" in ev["start"]:  # all-day series: instances are all-day too
+        inst.update(originalStartTime={"date": orig.date().isoformat()}, start={"date": orig.date().isoformat()},
+                    end={"date": (orig + length).date().isoformat()})
     inst.update(copy.deepcopy((ev.get("_exceptions") or {}).get(key, {})))
     return inst
 

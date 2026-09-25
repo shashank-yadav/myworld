@@ -84,8 +84,9 @@ class HttpResult:
     headers: dict[str, str]
 
 
-def _json(status: int, value: Any, extra: dict[str, str] | None = None) -> HttpResult:
-    return HttpResult(status, json.dumps(value, indent=2).encode() + b"\n",
+def _json(status: int, value: Any, extra: dict[str, str] | None = None, pretty: bool = True) -> HttpResult:
+    text = json.dumps(value, indent=2) + "\n" if pretty else json.dumps(value, separators=(",", ":"))
+    return HttpResult(status, text.encode(),
                       {"content-type": "application/json; charset=UTF-8", **(extra or {})})
 
 
@@ -163,13 +164,14 @@ def handle(host_obj: Any, target: str, method: str, path: str, query: str, heade
         data = result.data if isinstance(result.data, dict) else {"message": result.text}
         return _json(status, data)
     value = result.data
+    pretty = q.get("prettyPrint", ["true"])[-1].lower() != "false"
     if isinstance(value, Response):
         if value.body is None:
             return HttpResult(value.status, b"", value.headers)
         if isinstance(value.body, (bytes, bytearray)):
             return HttpResult(value.status, bytes(value.body), value.headers)
-        return _json(value.status, value.body, value.headers)
-    return _json(200, value)
+        return _json(value.status, value.body, value.headers, pretty)
+    return _json(200, value, pretty=pretty)
 
 
 def _multipart_related(ctype: str, body: bytes) -> Any:
