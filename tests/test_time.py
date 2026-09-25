@@ -110,3 +110,26 @@ def test_host_time_modes():
     assert fast.post("/envs", json={"spec": MAIL_LATER, "time": "virtual"}).json()["time"] == {"mode": "virtual"}
     assert fast.post("/envs", json={"spec": {**MAIL_LATER, "time": "virtual"}}).json()["time"] == {"mode": "virtual"}
     assert fast.post("/instances", json={"service": "slack", "id": "s", "time": "virtual"}).status_code == 200
+
+
+def test_anchoring_a_world_to_the_wall_clock_moves_every_date_by_whole_weeks():
+    from toolsim.env import _shift_text, anchor
+    assert _shift_text("Tue 2026-09-22T11:00:00-07:00, all day 2026-09-24", 21) == \
+        "Tue 2026-10-13T11:00:00-07:00, all day 2026-10-15"
+    assert _shift_text("RRULE:FREQ=WEEKLY;UNTIL=20261231T000000Z", 7) == "RRULE:FREQ=WEEKLY;UNTIL=20270107T000000Z"
+    assert _shift_text("Meet on Sep 22 or September 23, 2026", 14) == "Meet on Oct 6 or October 7, 2026"
+    assert _shift_text("version 2026-09-25.1 id 20260922", 7).startswith("version 2026-10-02"), "only date shapes move"
+    spec = {"name": "t", "task": "Book it for 2026-09-22.", "servers": {"calendar": {}, "gmail": {}},
+            "checks": [{"server": "calendar", "state": "events", "where": {"start.dateTime~": "2026-09-22"}}]}
+    wall = dt.datetime(2026, 10, 16, 18, 0, tzinfo=dt.timezone.utc)  # a Friday, 3.5 weeks later
+    env = anchor(Environment.from_dict(spec), wall)
+    assert env.now == wall.isoformat() and env.task == "Book it for 2026-10-13."
+    assert env.checks[0]["where"]["start.dateTime~"] == "2026-10-13"
+    run = EnvRun(env)
+    assert run.clock.now == wall
+    starts = [e["start"]["dateTime"][:10] for e in run.instances["calendar"].state["events"].values()]
+    assert starts and all(s >= "2026-10-12" for s in starts), "seeded events moved 3 weeks (weekdays kept)"
+    dates = [m["date"] for m in run.instances["gmail"].state["mailboxes"]["alex@acme.com"]["messages"].values()]
+    assert all("Oct 2026" in d for d in dates)
+    live = EnvRun(Environment.from_dict({**spec, "now": "wallclock"}))
+    assert abs((live.clock.now - dt.datetime.now(dt.timezone.utc)).total_seconds()) < 60

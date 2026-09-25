@@ -56,6 +56,7 @@ lists; ``!key`` negates a matcher and ``key~re`` matches a regular expression. B
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import datetime as dt
 import threading
 import re
@@ -430,6 +431,80 @@ def _addr(s: str) -> str:
     return s[s.index("<") + 1:s.index(">")] if "<" in s and ">" in s else s
 
 
+# -- anchoring a world to the wall clock ----------------------------------------------------------
+
+WALLCLOCK = "wallclock"
+_ISO = re.compile(r"(?<![\d-])(\d{4})-(\d{2})-(\d{2})(?=$|[T ]\d{2}:\d{2}|[^\d])")
+_COMPACT = re.compile(r"(?<!\d)(\d{4})(\d{2})(\d{2})(T\d{6}Z?)")
+_MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+           "November", "December"]
+_SPOKEN = re.compile(r"\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)([a-z]*)(\.?) (\d{1,2})(?:(,? )(\d{4}))?\b")
+
+
+def _shift_text(text: str, days: int) -> str:
+    """Move every date written in ``text`` by ``days``: ISO dates, RRULE/EXDATE stamps, "Sep 22"."""
+    def iso(m: re.Match[str]) -> str:
+        try:
+            d = dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3))) + dt.timedelta(days=days)
+        except ValueError:
+            return m.group(0)
+        return d.isoformat()
+
+    def compact(m: re.Match[str]) -> str:
+        try:
+            d = dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3))) + dt.timedelta(days=days)
+        except ValueError:
+            return m.group(0)
+        return d.strftime("%Y%m%d") + m.group(4)
+
+    def spoken(m: re.Match[str]) -> str:
+        abbr, rest, dot, day, sep, year = m.groups()
+        month = next(i for i, name in enumerate(_MONTHS, 1) if name.lower().startswith(abbr.lower()[:3]))
+        base_year = int(year) if year else 2026
+        try:
+            d = dt.date(base_year, month, int(day)) + dt.timedelta(days=days)
+        except ValueError:
+            return m.group(0)
+        name = _MONTHS[d.month - 1]
+        shown = name if rest else ("Sept" if abbr == "Sept" and d.month == 9 else name[:3])
+        return f"{shown}{dot} {d.day}" + (f"{sep}{d.year}" if year else "")
+
+    return _SPOKEN.sub(spoken, _COMPACT.sub(compact, _ISO.sub(iso, text)))
+
+
+def _shift(value: Any, days: int) -> Any:
+    if isinstance(value, str):
+        return _shift_text(value, days)
+    if isinstance(value, list):
+        return [_shift(v, days) for v in value]
+    if isinstance(value, dict):
+        return {k: _shift(v, days) for k, v in value.items()}
+    return value
+
+
+def anchor(env: Environment, wall: dt.datetime | None = None) -> Environment:
+    """The same world, moved to the wall clock: it starts *now*, and every seeded date (in data,
+    task text, events and checks) moves by whole weeks, so weekdays and times of day stay right.
+    Real clients (gog, gh, Google's libraries) read the machine's clock; this keeps them in step."""
+    wall = (wall or dt.datetime.now(dt.timezone.utc)).astimezone(dt.timezone.utc)
+    base_now = env.now if env.now not in (None, WALLCLOCK) else DEFAULT_NOW
+    base = dt.datetime.fromisoformat(str(base_now).replace("Z", "+00:00"))
+    days = ((wall - base).days // 7) * 7  # whole weeks, rounded down: seeded history stays in the past
+    base_env = dataclasses.replace(env, now=base.isoformat())
+    from .services import get_service
+    servers = {}
+    for s, cfg in env.servers.items():
+        seed = base_env.seed_for(s)
+        if seed is None:
+            seed = get_service(env.service_for(s)).default_seed()
+        servers[s] = {**{k: v for k, v in cfg.items() if k not in ("seed", "seed_file", "extend", "noise")},
+                      "seed": _shift(seed, days)}
+    return dataclasses.replace(env, now=wall.isoformat(), servers=servers, task=_shift(env.task, days),
+                               events=_shift(env.events, days), checks=_shift(env.checks, days),
+                               agents=_shift(env.agents, days), description=_shift(env.description, days),
+                               ambient=env.ambient)
+
+
 class EnvRun:
     """A running environment: one isolated instance per server, one shared clock.
 
@@ -438,6 +513,8 @@ class EnvRun:
 
     def __init__(self, env: Environment, run_id: str | None = None):
         from .services import get_service
+        if env.now == WALLCLOCK:
+            env = anchor(env)
         self.env = env
         self.id = run_id or env.name
         self.start = dt.datetime.fromisoformat(str(env.now or DEFAULT_NOW).replace("Z", "+00:00"))

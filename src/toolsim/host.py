@@ -152,6 +152,9 @@ class Host:
         self.check_faults(env.faults)
         if not env.time_set and self.config.speed is not None:
             env = dataclasses.replace(env, speed=self.config.speed)
+        if self.gateway is not None and env.now is None:
+            # real clients read the machine's clock: start the world now, and let it run in real time
+            env = dataclasses.replace(env, now="wallclock", speed=env.speed if env.time_set else 1.0)
         run = EnvRun(env, _valid_id(run_id, "environment run id") or f"{env.name}-{uuid.uuid4().hex[:6]}")
         return self._register(run)
 
