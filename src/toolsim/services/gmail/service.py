@@ -96,7 +96,7 @@ class Gmail(Service):
     def initial_state(self, seed: dict[str, Any], ctx: Instance) -> dict[str, Any]:
         """One mailbox per person. The seed's top-level user/labels/emails is the default mailbox;
         ``mailboxes: [{user, labels, emails}, ...]`` adds colleagues whose agents can join."""
-        primary = {k: seed[k] for k in ("user", "labels", "emails") if k in seed}
+        primary = {k: seed[k] for k in ("user", "labels", "emails", "contacts") if k in seed}
         state: dict[str, Any] = {"mailboxes": {}}
         for box in [primary, *seed.get("mailboxes", [])]:
             user = box.get("user") or {"email": "alex@acme.com", "name": "Alex Rivera"}

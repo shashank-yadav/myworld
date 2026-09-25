@@ -27,7 +27,7 @@ GITHUB_HOSTS = {"api.github.com", "uploads.github.com"}
 SERVICES_BY_HOST = {  # which simulated services can answer on a host
     "gmail.googleapis.com": {"gmail"}, "calendar-json.googleapis.com": {"calendar"},
     "sheets.googleapis.com": {"drive"}, "docs.googleapis.com": {"drive"}, "drive.googleapis.com": {"drive"},
-    "people.googleapis.com": {"gmail", "calendar", "drive"},
+    "people.googleapis.com": {"gmail"},
     "www.googleapis.com": {"gmail", "calendar", "drive"},
     "api.github.com": {"github"}, "uploads.github.com": {"github"},
 }
@@ -148,7 +148,8 @@ def handle(host_obj: Any, target: str, method: str, path: str, query: str, heade
         else:
             parsed = {"__bytes__": base64.b64encode(body).decode()}
     args = {"method": method.upper(), "path": path, "params": params, "query": q, "body": parsed,
-            "headers": {k: v for k, v in headers.items() if k in ("content-type", "if-match", "accept")},
+            "headers": {k: v for k, v in headers.items() if k in ("content-type", "if-match", "accept", "content-range",
+                                                                   "x-upload-content-type", "x-upload-content-length")},
             "host": target}
     run = host_obj.envs.get(grant.run) if grant.run else None
     as_ = run.env.identity_for(grant.agent, server) if run is not None and grant.agent else None
@@ -160,7 +161,7 @@ def handle(host_obj: Any, target: str, method: str, path: str, query: str, heade
     if result.is_error:
         status = result.status if result.status >= 400 else 400
         if _is_google(target):
-            return _json(status, g.body(result.data if result.data is not None else result.text, status))
+            return _json(status, g.body(result.data if result.data is not None else result.text, status, target))
         data = result.data if isinstance(result.data, dict) else {"message": result.text}
         return _json(status, data)
     value = result.data
@@ -192,7 +193,12 @@ def _multipart_related(ctype: str, body: bytes) -> Any:
             media = content
             if b"content-transfer-encoding: base64" in head.lower():
                 media = base64.b64decode(media)
-    return {**meta, "__media__": base64.b64encode(media).decode()}
+    media_type = "application/octet-stream"
+    for i, p in enumerate(parts):
+        head = p.lstrip(b"\r\n").partition(b"\r\n\r\n")[0].decode(errors="replace").lower()
+        if i > 0 and "content-type:" in head:
+            media_type = head.split("content-type:", 1)[1].split("\r\n")[0].strip()
+    return {**meta, "__media__": base64.b64encode(media).decode(), "__media_type__": media_type}
 
 
 def _servers(host_obj: Any, grant: Grant) -> dict[str, Instance] | None:

@@ -41,6 +41,8 @@ def _new_mailbox(ctx: Instance, seed: dict[str, Any], user: dict[str, Any]) -> d
                            "downloads": [], "_threads": {}}
     for name in SYSTEM_LABELS:
         box["labels"][name] = {"id": name, "name": name, "type": "system"}
+    if seed.get("contacts") is not None:  # saved Google Contacts (see people.py)
+        box["_seed_contacts"] = list(seed["contacts"])
     for name in seed.get("labels", []):
         _new_label(ctx, box, name if isinstance(name, str) else name["name"])
     for e in sorted(seed.get("emails", []), key=lambda e: str(e.get("date") or "")):

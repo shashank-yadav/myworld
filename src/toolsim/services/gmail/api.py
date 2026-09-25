@@ -872,3 +872,6 @@ def filters_delete(ctx: Instance, req: Request) -> Any:
         raise error(404, "Requested entity was not found.", "notFound")
     return Response(204)
 
+
+
+from . import people  # noqa: E402,F401  (Google Contacts: the People API)

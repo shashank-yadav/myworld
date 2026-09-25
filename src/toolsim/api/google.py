@@ -26,17 +26,24 @@ def error(code: int, message: str, reason: str | None = None, *, status: str | N
                                 "status": status or STATUS.get(code, "UNKNOWN")}}, status=code)
 
 
-def body(payload: Any, status: int) -> dict[str, Any]:
-    """Any service error payload in Google's shape (``{"error": {code, message, errors, status}}``)."""
+LEGACY_ERRORS = {"www.googleapis.com", "gmail.googleapis.com", "drive.googleapis.com", "calendar-json.googleapis.com"}
+
+
+def body(payload: Any, status: int, host: str = "www.googleapis.com") -> dict[str, Any]:
+    """Any service error payload in Google's shape. The older APIs (Gmail, Calendar, Drive) list
+    ``errors[]`` with reasons; the newer ones (Sheets, Docs, People) only code, message and status."""
     e = payload.get("error") if isinstance(payload, dict) else None
-    if isinstance(e, dict) and "code" in e and "message" in e:
-        out = {"code": e["code"], "message": e["message"]}
-        out["errors"] = e.get("errors") or [{"message": e["message"], "domain": "global",
-                                             "reason": REASON.get(int(e["code"]), "error")}]
-        out["status"] = e.get("status") or STATUS.get(int(e["code"]), "UNKNOWN")
-        return {"error": out}
-    message = e if isinstance(e, str) else payload if isinstance(payload, str) else "Request failed."
-    return error(status, str(message)).payload
+    if not (isinstance(e, dict) and "code" in e and "message" in e):
+        message = e if isinstance(e, str) else payload if isinstance(payload, str) else "Request failed."
+        e = error(status, str(message)).payload["error"]
+    out = {"code": e["code"], "message": e["message"]}
+    if host in LEGACY_ERRORS:
+        out["errors"] = [{"message": x.get("message", e["message"]), "domain": x.get("domain", "global"),
+                          "reason": x.get("reason", REASON.get(int(e["code"]), "error")),
+                          **{k: x[k] for k in ("location", "locationType") if k in x}}
+                         for x in e.get("errors") or [{}]]
+    out["status"] = e.get("status") or STATUS.get(int(e["code"]), "UNKNOWN")
+    return {"error": out}
 
 
 # -- paging ------------------------------------------------------------------------------------
