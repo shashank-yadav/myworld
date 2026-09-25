@@ -94,6 +94,37 @@ Kinds:
 A fault fires on the Nth matching call, with a seeded probability, or throughout a window
 (`from_call`/`until_call`, or `start`/`end` in virtual time) for an outage. Faults are reproducible.
 
+## Environments from real data
+
+Build a world from exports of your real tools. No accounts or API access are needed:
+
+```bash
+toolsim import gmail    "Takeout/Mail/All mail.mbox"  -o seeds/gmail.yaml    --anonymize --map people.json --rebase 2026-09-21T16:00:00Z
+toolsim import calendar Takeout/Calendar/me.ics       -o seeds/calendar.yaml --anonymize --map people.json
+toolsim import slack    acme-slack-export.zip         -o seeds/slack.yaml    --anonymize --map people.json
+toolsim import github   ~/src/api --issues issues.json --pulls prs.json -o seeds/github.yaml
+toolsim import jira     jira-export.csv               -o seeds/jira.yaml --me "Dana Wu"
+toolsim import drive    Takeout/Drive                 -o seeds/drive.yaml
+```
+
+| Source | Export | What's kept |
+|---|---|---|
+| Gmail | Google Takeout mbox | senders/recipients, bodies (HTML becomes text), labels, threads, attachment metadata |
+| Calendar | `.ics` (Takeout or any iCalendar) | time zones, attendees and RSVPs, organizers, recurrence, free vs busy |
+| Slack | workspace export (zip or folder) | users, channels and members, messages, threads, reactions, @mentions |
+| GitHub | a local clone + `gh issue/pr list --json` | files, branches with their changes, issues, PRs and comments, **original numbers** |
+| Jira | CSV export or REST search JSON | **original keys**, status/type/priority mapped to the workflow, labels, comments, epics |
+| Drive | a folder (e.g. Takeout/Drive) | folder tree, text content (including `.docx`), file types and sizes |
+
+Import options:
+- `--anonymize`: every real person gets a consistent pseudonym, and emails and phone numbers inside text are masked.
+- `--map people.json`: keeps pseudonyms identical across imports, so "Dana" is the same fake person in Gmail, Slack and Jira.
+- `--keep-domain`: leaves vendors such as stripe.com as they are.
+- `--rebase`: shifts time so the newest item is the environment's "now".
+- `--limit`: caps the size.
+
+The resulting seed files drop into any environment (`seed_file:`), together with issues, events and agents.
+
 ## Issues: realistic trouble, one line each
 
 ```yaml

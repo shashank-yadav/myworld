@@ -148,16 +148,26 @@ class GitHub(Service):
                 sha = repo["branches"].get(ref, ref)
                 repo["statuses"][sha] = [{"context": s["context"], "state": s["state"],
                                           "description": s.get("description", "")} for s in sts]
-            for i in r.get("issues", []):
-                issue = _new_issue(ctx, state, repo, i["title"], i.get("body"), i.get("author", state["viewer"]),
-                                   i.get("labels"), i.get("assignees"))
-                if i.get("state") == "closed":
-                    issue["state"], issue["closed_at"] = "closed", ctx.now().isoformat()
-                for c in i.get("comments", []):
-                    _comment(ctx, repo, issue["number"], c.get("author", state["viewer"]), c["body"])
-            for p in r.get("pulls", []):
-                _new_pull(ctx, state, repo, p["title"], p.get("body"), p["head"], p["base"], p.get("author", state["viewer"]),
-                          p.get("draft", False))
+            items = [("issue", i) for i in r.get("issues", [])] + [("pull", p) for p in r.get("pulls", [])]
+            if any("number" in x for _, x in items):  # imported data: keep the real numbers
+                items.sort(key=lambda kx: kx[1].get("number", 0))
+            for kind, x in items:
+                if x.get("number") and x["number"] > repo["next_number"]:
+                    repo["next_number"] = int(x["number"])
+                if kind == "issue":
+                    issue = _new_issue(ctx, state, repo, x["title"], x.get("body"), x.get("author", state["viewer"]),
+                                       x.get("labels"), x.get("assignees"))
+                    if x.get("state") == "closed":
+                        issue["state"], issue["closed_at"] = "closed", ctx.now().isoformat()
+                    for c in x.get("comments", []):
+                        _comment(ctx, repo, issue["number"], c.get("author", state["viewer"]), c["body"])
+                else:
+                    pr = _new_pull(ctx, state, repo, x["title"], x.get("body"), x["head"], x["base"],
+                                   x.get("author", state["viewer"]), x.get("draft", False))
+                    if x.get("state") == "closed":
+                        repo["issues"][pr["number"]].update(state="closed", closed_at=ctx.now().isoformat())
+                    for c in x.get("comments", []):
+                        _comment(ctx, repo, pr["number"], c.get("author", state["viewer"]), c["body"])
         return state
 
     actor_key = "viewer"

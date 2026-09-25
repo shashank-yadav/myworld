@@ -665,10 +665,12 @@ def _box(ctx: Instance, email: str) -> dict[str, Any]:
 
 
 @action("deliver_email")
-def act_deliver_email(ctx: Instance, to: str, sender: str, subject: str, body: str, cc: list[str] | None = None,
-                      attachments: list[dict] | None = None, thread_subject: str | None = None) -> str:
+def act_deliver_email(ctx: Instance, sender: str, subject: str, body: str, to: str | None = None,
+                      cc: list[str] | None = None, attachments: list[dict] | None = None,
+                      thread_subject: str | None = None) -> str:
     """An email arrives from outside (or from a colleague without an agent). Filters apply.
-    ``thread_subject`` threads it with an existing conversation."""
+    ``to`` defaults to the world's default mailbox; ``thread_subject`` threads it with an existing conversation."""
+    to = to or ctx.state["default"]
     box = _box(ctx, to)
     thread = None
     if thread_subject:

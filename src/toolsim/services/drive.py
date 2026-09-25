@@ -597,8 +597,9 @@ def _named(state: dict[str, Any], file: str) -> dict[str, Any]:
 
 
 @action("revoke_access")
-def act_revoke_access(ctx: Instance, file: str, email: str) -> None:
-    """The owner removes someone's access (mid-task, the agent starts getting 404s)."""
+def act_revoke_access(ctx: Instance, file: str, email: str | None = None) -> None:
+    """The owner removes someone's access (default: the drive's own user), so the agent starts getting 404s."""
+    email = email or ctx.state["me"]
     f = _named(ctx.state, file)
     f["permissions"] = [p for p in f["permissions"] if p.get("emailAddress", "").lower() != email.lower()
                         or p["role"] == "owner"]

@@ -72,6 +72,29 @@ def cmd_issues(args: argparse.Namespace) -> None:
         print(f"  {name:9} {', '.join(a.name for a in cls.actions)}")
 
 
+def cmd_import(args: argparse.Namespace) -> None:
+    import datetime as dt
+
+    from .importers import IMPORTERS, ImportOptions
+    opts = ImportOptions(anonymize=args.anonymize, domain=args.domain, keep_domains=tuple(args.keep_domain or ()),
+                         limit=args.limit, map_path=Path(args.map) if args.map else None,
+                         rebase_to=dt.datetime.fromisoformat(args.rebase.replace("Z", "+00:00")) if args.rebase else None)
+    extra = {k: v for k, v in {"owner": args.owner, "issues": args.issues, "pulls": args.pulls, "name": args.repo,
+                               "viewer": args.viewer, "me": args.me}.items() if v}
+    import inspect
+    accepted = inspect.signature(IMPORTERS[args.kind]).parameters
+    seed = IMPORTERS[args.kind](args.path, opts, **{k: v for k, v in extra.items() if k in accepted})
+    text = yaml.safe_dump(seed, sort_keys=False, allow_unicode=True, width=120)
+    if args.output:
+        Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+        Path(args.output).write_text(text)
+        counts = {k: len(v) for k, v in seed.items() if isinstance(v, list)}
+        print(f"wrote {args.output}: {counts}")
+        print(f"use it:  servers: {{{args.kind}: {{seed_file: {args.output}}}}}")
+    else:
+        print(text)
+
+
 def cmd_stdio(args: argparse.Namespace) -> None:
     from .core.instance import Instance
     from .core.mcp import serve_stdio
@@ -134,6 +157,24 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--rng-seed", type=int, default=0)
     s.add_argument("--version", dest="tool_version", help="service version date (default: latest)")
     s.set_defaults(fn=cmd_stdio)
+
+    s = sub.add_parser("import", help="build a seed from an export of a real tool")
+    s.add_argument("kind", choices=["gmail", "calendar", "slack", "github", "jira", "drive"])
+    s.add_argument("path", help="the export: mbox, .ics, Slack zip/folder, git repo, Jira CSV/JSON, or a folder")
+    s.add_argument("-o", "--output", help="seed file to write (default: print)")
+    s.add_argument("--anonymize", action="store_true", help="replace people with consistent pseudonyms and scrub text")
+    s.add_argument("--map", help="pseudonym map file, shared across imports so people stay consistent")
+    s.add_argument("--domain", default="acme.com", help="company domain for pseudonymized colleagues")
+    s.add_argument("--keep-domain", action="append", help="external domain to leave as-is (repeatable)")
+    s.add_argument("--rebase", help="shift time so the newest item lands here (e.g. 2026-09-21T16:00:00Z)")
+    s.add_argument("--limit", type=int, help="keep at most N newest items per collection")
+    s.add_argument("--owner", help="gmail/calendar/drive: the account owner's email")
+    s.add_argument("--me", help="jira: your display name")
+    s.add_argument("--viewer", help="github: your login")
+    s.add_argument("--repo", help="github: owner/name (default: from the origin remote)")
+    s.add_argument("--issues", help="github: `gh issue list --json ...` output")
+    s.add_argument("--pulls", help="github: `gh pr list --json ...` output")
+    s.set_defaults(fn=cmd_import)
 
     s = sub.add_parser("issues", help="list the issue library and world actions")
     s.set_defaults(fn=cmd_issues)

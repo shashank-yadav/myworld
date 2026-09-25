@@ -111,15 +111,25 @@ class Jira(Service):
             state["projects"][p["key"]] = {"key": p["key"], "name": p["name"], "id": str(ctx.next("project_id", 10000)),
                                            "lead": p.get("lead", me["account_id"]), "next": 1, "archived": p.get("archived", False)}
             keys: list[str] = []
-            for i in p.get("issues", []):
+            issues = p.get("issues", [])
+            if any(i.get("key") for i in issues):  # imported data: keep the real keys (OPS-123)
+                issues = sorted(issues, key=lambda i: int(str(i.get("key", "X-0")).rsplit("-", 1)[-1]))
+            for i in issues:
+                if i.get("key"):
+                    n = int(str(i["key"]).rsplit("-", 1)[-1])
+                    state["projects"][p["key"]]["next"] = max(state["projects"][p["key"]]["next"], n)
                 issue = _new_issue(ctx, state, p["key"], i["summary"], i.get("type", "Task"), i.get("description"),
                                    i.get("assignee"), i.get("priority", "Medium"), i.get("labels"),
                                    reporter=i.get("reporter", me["account_id"]))
                 issue["status"] = i.get("status", "To Do")
                 if issue["status"] == "Done":
                     issue["resolution"], issue["resolutiondate"] = "Done", issue["updated"]
-                if i.get("epic"):
+                if isinstance(i.get("epic"), int):
                     issue["epic"] = keys[i["epic"] - 1]
+                elif i.get("epic"):
+                    issue["epic"] = i["epic"]  # a key, resolved after all issues exist
+                if i.get("created"):
+                    issue["created"] = issue["updated"] = i["created"]
                 for c in i.get("comments", []):
                     _comment(ctx, issue, c.get("author", me["account_id"]), c["body"])
                 keys.append(issue["key"])
