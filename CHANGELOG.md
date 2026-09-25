@@ -4,6 +4,12 @@ Service behavior is versioned separately by date (`toolsim versions`); this file
 
 ## Unreleased
 
+- **World runtime (`toolsim.world`):** runs are worlds of components with a journal and checkpoints.
+  Branch at any step, replay with divergence reports (virtual and real time), structural diffs,
+  recorded mutations, and checks on any component. New components: `directory`, `sqlite` and
+  `remote` (a six-route HTTP protocol, so environments in any language plug in). Timed events can
+  mutate components. HTTP: `/envs/{id}/journal|checkpoint|branch|replay|diff|mutate|components`.
+
 - **Real clients, unmodified:** an HTTPS gateway (`toolsim serve --gateway PORT`) serves the Gmail,
   Calendar, Drive, Sheets, Docs, People, OAuth and GitHub (REST + GraphQL) APIs from the simulated
   worlds. Verified with `gog` (OpenClaw), Hermes' `google_api.py` (Google's Python client) and `gh`.

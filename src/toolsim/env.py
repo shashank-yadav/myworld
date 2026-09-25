@@ -56,6 +56,7 @@ lists; ``!key`` negates a matcher and ``key~re`` matches a regular expression. B
 from __future__ import annotations
 
 import contextlib
+import copy
 import dataclasses
 import datetime as dt
 import threading
@@ -87,6 +88,7 @@ class Environment:
     ambient: dict[str, Any] | None = None  # background activity, generated per rng_seed (see toolsim.noise)
     speed: float | None = None  # None: virtual time (fast, deterministic); 1: real time; 60: a minute per second
     time_set: bool = False      # whether the spec chose a clock (otherwise a host may apply its default)
+    components: dict[str, dict[str, Any]] = field(default_factory=dict)  # directories, databases, remote (toolsim.world)
 
     @classmethod
     def load(cls, path: str | Path) -> Environment:
@@ -107,6 +109,15 @@ class Environment:
         servers = spec.get("servers") or {}
         if isinstance(servers, list):
             servers = {s: {} for s in servers}
+        components = spec.get("components") or {}
+        if not isinstance(components, dict):
+            raise ValueError("components must be a mapping of name -> {type: directory|sqlite|remote, ...}")
+        for name, comp in components.items():
+            if name in servers:
+                raise ValueError(f"component {name!r} has the same name as a server")
+            if (comp or {}).get("type") not in ("directory", "sqlite", "remote"):
+                raise ValueError(f"component {name!r}: type must be directory, sqlite or remote")
+        targets = {**servers, **components}
         for name, cfg in servers.items():
             service = (cfg or {}).get("service", name)
             if service not in SERVICES:
@@ -125,12 +136,14 @@ class Environment:
                 ref = a.get("contains")
                 if isinstance(ref, dict) and ref.get("server") not in servers:
                     raise ValueError(f"check {c.get('name')!r} looks up unknown server {ref.get('server')!r}")
-            elif c.get("server") not in servers:
+            elif c.get("server") not in targets:
                 raise ValueError(f"check {c.get('name')!r} targets unknown server {c.get('server')!r}")
+            elif c["server"] in components and "calls" in c:
+                raise ValueError(f"check {c.get('name')!r}: components have state, not calls")
             if c.get("weight") is not None and (not isinstance(c["weight"], (int, float)) or c["weight"] < 0):
                 raise ValueError(f"check {c.get('name')!r}: weight must be a non-negative number")
         for n, ev in enumerate(spec.get("events") or []):
-            _validate_event(ev, n, servers)
+            _validate_event(ev, n, servers, components)
         agents = spec.get("agents") or {"agent": {"task": spec.get("task", "")}}
         for name, a in agents.items():
             unknown = set((a or {}).get("servers") or []) - set(servers)
@@ -144,7 +157,8 @@ class Environment:
                    description=spec.get("description", ""), rng_seed=spec.get("rng_seed", 0), base_dir=base_dir,
                    agents={k: v or {} for k, v in agents.items()}, now=spec.get("now"),
                    events=list(spec.get("events") or []), ambient=_ambient_spec(spec.get("ambient"), servers),
-                   speed=parse_time(spec.get("time")), time_set="time" in spec)
+                   speed=parse_time(spec.get("time")), time_set="time" in spec,
+                   components={k: dict(v or {}) for k, v in components.items()})
 
     def agent_servers(self, agent: str) -> list[str]:
         return list(self.agents[agent].get("servers") or self.servers)
@@ -215,7 +229,8 @@ class Environment:
                 continue
             world = worlds[c["server"]]
             if "state" in c:
-                view = SERVICES[self.service_for(c["server"])]().grading_view(world["state"])
+                view = world["view"] if "view" in world else \
+                    SERVICES[self.service_for(c["server"])]().grading_view(world["state"])
                 items = _collection(view, c["state"])
             else:
                 items = [call for call in world["calls"] if c["calls"] in ("*", call["tool"])
@@ -250,7 +265,8 @@ class Environment:
             return bool(re.search(str(spec["matches"]), text, re.I | re.S)), {"matches": spec["matches"]}
         want = spec["contains"]
         if isinstance(want, dict):  # a value from the final state, e.g. the merge commit SHA
-            view = SERVICES[self.service_for(want["server"])]().grading_view(worlds[want["server"]]["state"])
+            w = worlds[want["server"]]
+            view = w["view"] if "view" in w else SERVICES[self.service_for(want["server"])]().grading_view(w["state"])
             hits = [i for i in _collection(view, want["state"]) if _match(i, want.get("where") or {})]
             values = [v for i in hits for v in _values(i, want["field"])] if want.get("field") else hits
             values = [str(v) for v in values if v not in (None, "")]
@@ -274,8 +290,15 @@ def _read_yaml(path: Path) -> Any:
 TRIGGERS = ("at", "before", "after", "after_calls")
 
 
-def _validate_event(ev: dict[str, Any], n: int, servers: dict[str, Any]) -> None:
+def _validate_event(ev: dict[str, Any], n: int, servers: dict[str, Any],
+                    components: dict[str, Any] | None = None) -> None:
     label = ev.get("name") or f"event {n + 1}"
+    if "component" in ev:  # a mutation of a directory, database or remote component
+        if ev["component"] not in (components or {}):
+            raise ValueError(f"{label}: unknown component {ev['component']!r}")
+        if not ev.get("mutate"):
+            raise ValueError(f"{label}: a component event needs `mutate` (the operation) and `params`")
+        return
     if ev.get("server") not in servers:
         raise ValueError(f"{label}: unknown server {ev.get('server')!r}")
     if not ev.get("action"):
@@ -509,10 +532,14 @@ class EnvRun:
     """A running environment: one isolated instance per server, one shared clock.
 
     Snapshots are atomic across every server (all instance locks are held), so a multi-agent
-    world can be saved, restored or forked at any instant."""
+    world can be saved, restored or forked at any instant. A run is also a world
+    (``toolsim.world``): servers and ``components`` (directories, databases, remote processes)
+    are its components; every call, injected event, mutation and passage of time goes into its
+    ``journal``; ``checkpoint``/``branch``/``replay``/``diff``/``mutate`` work on the whole thing."""
 
-    def __init__(self, env: Environment, run_id: str | None = None):
+    def __init__(self, env: Environment, run_id: str | None = None, *, clone_of: EnvRun | None = None):
         from .services import get_service
+        from .world import ServiceComponent, World, build
         if env.now == WALLCLOCK:
             env = anchor(env)
         self.env = env
@@ -529,6 +556,12 @@ class EnvRun:
                                       version=env.version_for(s), clock=self.clock, lock=self.lock, hooks=self)
                           for s in env.servers}
         self._server_of = {id(i): s for s, i in self.instances.items()}
+        self.world = World(lock=self.lock, now=lambda: self.clock.now.isoformat())
+        for s, inst in self.instances.items():
+            self.world.add(s, ServiceComponent(inst))
+        for name, spec in env.components.items():  # others' own directories and databases are cloned, never shared
+            self.world.add(name, clone_of.world.components[name].clone() if clone_of else build(spec, env.base_dir))
+        self._time_logged = self.start
         for agent in env.agents:  # fail fast on identities that don't exist in the seeded world
             for server in env.agent_servers(agent):
                 ident = env.identity_for(agent, server)
@@ -539,6 +572,18 @@ class EnvRun:
                         raise ValueError(f"agent {agent!r} on {server}: {e}") from None
         with self.lock:
             self._due_by_time()  # events without a trigger are part of the starting world
+            self._initial_components = {n: self.world.components[n].snapshot() for n in env.components}
+            self.world.journal.clear()
+            self.world.checkpoints[0] = None  # the start: rebuilt from the spec when needed (see _checkpoint)
+
+    @property
+    def journal(self) -> list[dict[str, Any]]:
+        return self.world.journal
+
+    @property
+    def components(self) -> dict[str, Any]:
+        """The non-service components (directories, databases, remote processes)."""
+        return {n: self.world.components[n] for n in self.env.components}
 
     @contextlib.contextmanager
     def _all_locked(self):
@@ -552,13 +597,23 @@ class EnvRun:
             self.fired, self.matches, self.answer = [], {}, None
             for inst in self.instances.values():
                 inst.reset()
+            for n, snap in self._initial_components.items():
+                self.world.components[n].restore(snap)
+            self.world.journal.clear()
+            self.world.checkpoints.clear()
+            self._time_logged = self.start
             self._due_by_time()
+            self.world.checkpoints[0] = None
 
     def snapshot(self) -> dict[str, Any]:
         with self._all_locked():
-            return {"clock": self.clock.now.isoformat(), "seq": self.clock.seq, "fired": list(self.fired),
-                    "answer": self.answer,
-                    "matches": dict(self.matches), "instances": {s: i.snapshot() for s, i in self.instances.items()}}
+            out = {"clock": self.clock.now.isoformat(), "seq": self.clock.seq, "fired": list(self.fired),
+                   "answer": self.answer,
+                   "matches": dict(self.matches), "instances": {s: i.snapshot() for s, i in self.instances.items()}}
+            if hasattr(self, "world"):
+                out["components"] = {n: c.snapshot() for n, c in self.components.items()}
+                out["journal"] = len(self.world.journal)
+            return out
 
     def restore(self, snap: dict[str, Any]) -> None:
         with self._all_locked():
@@ -569,12 +624,21 @@ class EnvRun:
             self.fired = list(snap.get("fired", []))
             self.answer = snap.get("answer")
             self.matches = {int(k): v for k, v in snap.get("matches", {}).items()}
+            for n, c in self.components.items():
+                if n in snap.get("components", {}):
+                    c.restore(snap["components"][n])
+            if "journal" in snap:  # going back in time: what came after is no longer history
+                del self.world.journal[snap["journal"]:]
+            self._time_logged = self.clock.now
 
     # -- world events ------------------------------------------------------------------------
 
     def _fire(self, n: int, source: str) -> None:
         ev = self.events[n]
         self.fired.append(n)
+        if "component" in ev:
+            self.world.components[ev["component"]].mutate(ev["mutate"], **(ev.get("params") or {}))
+            return
         self.instances[ev["server"]].apply_action(ev["action"], ev.get("params"), as_=ev.get("as"),
                                                   source=f"{ev.get('name') or 'event ' + str(n + 1)} ({source})")
 
@@ -593,6 +657,9 @@ class EnvRun:
 
     def _due_by_time(self) -> None:
         self.clock.sync()
+        if self.clock.realtime and not self.world.replaying and self.clock.now != self._time_logged:
+            self.world.record({"kind": "time", "to": self.clock.now.isoformat()})  # replays need wall time too
+            self._time_logged = self.clock.now
         for inst in self.instances.values():
             inst.run_due()
         for n, ev in enumerate(self.events):
@@ -624,20 +691,141 @@ class EnvRun:
         self._matching("before", self._server_of[id(inst)], tool, agent, None)
 
     def after_call(self, inst: Instance, record: dict[str, Any]) -> None:
-        self._matching("after", self._server_of[id(inst)], record["tool"], record.get("agent"), record)
+        from .world import result_sha
+        server = self._server_of[id(inst)]
+        self.world.record({"kind": "call", "component": server, "tool": record["tool"], "args": record["args"],
+                           "agent": record.get("agent"), "as": record.get("as"), "t0": record.get("t0"),
+                           "call_at": record["at"], "mode": record.get("mode"), "raw": record.get("raw", False),
+                           "result_sha": result_sha(record.get("result"))})
+        self._time_logged = self.clock.now
+        self._matching("after", server, record["tool"], record.get("agent"), record)
         self._due_by_time()
 
     def advance(self, seconds: float) -> None:
         """Let time pass (e.g. an agent waiting); fires any timed events that become due."""
         with self.lock:
             self.clock.now += dt.timedelta(seconds=seconds)
+            self.world.record({"kind": "advance", "seconds": seconds})
+            self._time_logged = self.clock.now
             self._due_by_time()
 
     def inject(self, server: str, action_name: str, params: dict[str, Any] | None = None, as_: str | None = None) -> Any:
         """Make something happen right now (for harnesses driving a live run)."""
         if server not in self.instances:
             raise ValueError(f"unknown server {server!r}")
-        return self.instances[server].apply_action(action_name, params, as_=as_, source="injected")
+        with self.lock:
+            result = self.instances[server].apply_action(action_name, params, as_=as_, source="injected")
+            self.world.record({"kind": "inject", "component": server, "action": action_name,
+                               "params": copy.deepcopy(params or {}), "as": as_})
+            return result
+
+    def mutate(self, name: str, op: str, **params: Any) -> Any:
+        """Change a component (a directory, database or remote process), or run a service's world
+        action; recorded in the journal so branches and replays repeat it."""
+        if name in self.instances:
+            return self.inject(name, op, params, as_=params.pop("as", None))
+        return self.world.mutate(name, op, **params)
+
+    def submit(self, answer: str) -> None:
+        with self.lock:
+            self.answer = answer
+            self.world.record({"kind": "answer", "answer": answer})
+
+    # -- checkpoints, branches, replays -------------------------------------------------------
+
+    def checkpoint(self) -> int:
+        """Remember this instant; returns its step (the journal's length)."""
+        with self.lock:
+            return self.world.checkpoint(self.snapshot())
+
+    def branch(self, step: int | None = None, run_id: str | None = None) -> EnvRun:
+        """An independent run as this one was after ``step`` journal entries (default: now):
+        the nearest checkpoint at or before it, then the journal replayed up to it."""
+        with self.lock:
+            step = len(self.world.journal) if step is None else step
+            if not 0 <= step <= len(self.world.journal):
+                raise ValueError(f"step must be within 0..{len(self.world.journal)}")
+            base = self.world.nearest_checkpoint(step)
+            other = EnvRun(dataclasses.replace(self.env, speed=None), run_id or f"{self.id}-branch", clone_of=self)
+            other.restore(self._checkpoint(base))
+            other.world.journal[:] = copy.deepcopy(self.world.journal[:base])
+            other.world.checkpoints = {k: copy.deepcopy(v) for k, v in self.world.checkpoints.items() if k <= base}
+            other.world.checkpoints[0] = None
+            diverged = other._replay(self.world.journal[base:step])
+            other.clock.speed = self.clock.speed  # replayed deterministically; carries on like the original
+            other.clock.reanchor()
+            other.diverged = diverged
+            return other
+
+    def replay(self) -> list[dict[str, Any]]:
+        """Re-run the whole journal from the first checkpoint and report where results differ from
+        what happened (an empty list: the run is reproducible)."""
+        return self.branch(len(self.world.journal), f"{self.id}-replay").diverged
+
+    def _replay(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        from .world import result_sha
+        diverged = []
+        self.world.replaying = True
+        try:
+            for e in entries:
+                n = len(self.world.journal)
+                got = self._apply(e)
+                del self.world.journal[n:]
+                self.world.journal.append({**copy.deepcopy(e), "i": n})
+                if e.get("result_sha") and got is not None and result_sha(got) != e["result_sha"]:
+                    diverged.append({"step": e["i"], "kind": e["kind"], "component": e.get("component"),
+                                     "tool": e.get("tool") or e.get("op")})
+        finally:
+            self.world.replaying = False
+        return diverged
+
+    def _apply(self, e: dict[str, Any]) -> Any:
+        kind = e["kind"]
+        if kind == "call":
+            inst = self.instances[e["component"]]
+            if e.get("mode") == "realtime":
+                self.clock.pin = dt.datetime.fromisoformat(e["call_at"])
+            elif e.get("t0"):
+                self.clock.now = dt.datetime.fromisoformat(e["t0"])
+            tool = None
+            if e.get("raw"):
+                from .api import resolve
+                args = e["args"]
+                found = resolve(args.get("host", ""), args.get("method", "GET"), args.get("path", ""),
+                                {inst.service.name})
+                tool = found[0].tool if found else None
+            result = inst.call(e["tool"], copy.deepcopy(e["args"]), agent=e.get("agent"), as_=e.get("as"), tool=tool)
+            return inst.calls[-1].get("result") if inst.calls else result.text
+        if kind == "inject":
+            return self.inject(e["component"], e["action"], copy.deepcopy(e["params"]), as_=e.get("as"))
+        if kind == "advance":
+            self.advance(e["seconds"])
+        elif kind == "time":
+            self.clock.now = dt.datetime.fromisoformat(e["to"])
+            self._due_by_time()
+        elif kind == "mutate":
+            return self.world.mutate(e["component"], e["op"], **copy.deepcopy(e["params"]))
+        elif kind == "answer":
+            self.submit(e["answer"])
+        return None
+
+    def diff(self, since: int = 0, until: int | None = None) -> dict[str, list[dict[str, Any]]]:
+        """What changed in every server and component between two checkpoints (default: since the start)."""
+        return self.world.diff(self._checkpoint(since), None if until is None else self._checkpoint(until))
+
+    def _checkpoint(self, step: int) -> dict[str, Any]:
+        """A checkpoint's snapshot; the start is rebuilt from the spec (the same seed makes the same world)."""
+        if step not in self.world.checkpoints:
+            raise ValueError(f"no checkpoint at step {step} (have {sorted(self.world.checkpoints)})")
+        snap = self.world.checkpoints[step]
+        if snap is None:
+            fresh = EnvRun(dataclasses.replace(self.env, speed=None), f"{self.id}-start", clone_of=self)
+            for n, c in fresh.components.items():
+                c.restore(self._initial_components[n])
+            snap = fresh.snapshot()
+            fresh.world.close()  # its components are temporary clones
+            self.world.checkpoints[step] = snap
+        return snap
 
     def timeline(self) -> list[dict[str, Any]]:
         """Agent calls and world events together, in the order they happened."""
@@ -646,9 +834,13 @@ class EnvRun:
         return sorted(items, key=lambda x: x["global_seq"])
 
     def fork(self, run_id: str) -> EnvRun:
-        clone = EnvRun(self.env, run_id)
-        clone.restore(self.snapshot())
-        return clone
+        with self.lock:
+            clone = EnvRun(self.env, run_id, clone_of=self)
+            snap = self.snapshot()
+            clone.restore(snap)
+            clone.world.journal[:] = copy.deepcopy(self.world.journal)
+            clone.world.checkpoints = copy.deepcopy(self.world.checkpoints)
+            return clone
 
     def calls(self) -> list[dict[str, Any]]:
         """Every call from every agent, in the order they happened."""
@@ -656,7 +848,11 @@ class EnvRun:
         return sorted(merged, key=lambda c: c["global_seq"])
 
     def worlds(self) -> dict[str, dict[str, Any]]:
-        return {s: {"state": i.state, "calls": i.calls} for s, i in self.instances.items()}
+        out = {s: {"state": i.state, "calls": i.calls} for s, i in self.instances.items()}
+        for n, c in self.components.items():
+            v = c.view()
+            out[n] = {"view": v, "state": v, "calls": []}
+        return out
 
     def grade(self, answer: str | None = None) -> dict[str, Any]:
         with self._all_locked():

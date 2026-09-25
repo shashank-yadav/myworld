@@ -304,6 +304,39 @@ No accounts or API access are needed. Options:
 
 The resulting seed files drop into any environment with `seed_file:`.
 
+## The world runtime
+
+Every environment run is a *world*: named components, a journal of everything that happened to
+them, and checkpoints. Snapshot, fork, branch, replay, mutate, diff and evaluate work on the whole
+thing, whatever its components are.
+
+- **Components:** simulated services, plus `directory` (e.g. the agent's workspace), `sqlite`
+  (e.g. an app's database) and `remote`: any process, in any language, that speaks a six-route
+  HTTP protocol (`toolsim.world.adapters`; `serve_component` exposes a Python component that way).
+  A component implements `snapshot`, `restore`, `clone`, `view`, `mutate` and `mutations`.
+- **Journal:** calls (MCP and REST), injected events, mutations, waits and, in real-time runs, the
+  passage of wall time.
+- **Branch:** `run.branch(step)` restores the nearest checkpoint and replays the journal up to
+  `step`, into an independent run. **Replay:** `run.replay()` re-runs the whole journal and lists
+  any step whose result differs (empty: the run is reproducible, real-time runs included).
+- **Diff:** `run.diff(since, until)` shows what changed in every component between checkpoints.
+- **Mutate and evaluate:** `run.mutate(component, op, ...)` makes a recorded change; checks
+  (`server: db, state: tables.orders, where: ...`) grade any component's state.
+
+```yaml
+components:
+  db: {type: sqlite, sql: "CREATE TABLE orders(id INTEGER PRIMARY KEY, status TEXT); INSERT INTO orders(status) VALUES ('paid')"}
+  workspace: {type: directory, files: {notes.md: "todo\n"}}
+events:
+  - {component: db, mutate: sql, at: "+10m", params: {statement: "INSERT INTO orders(status) VALUES ('disputed')"}}
+checks:
+  - {server: db, state: tables.orders, where: {status: refunded}}
+```
+
+Over HTTP: `/envs/{id}/journal`, `/checkpoint`, `/branch`, `/replay`, `/diff`, `/mutate`,
+`/components`. Changes made outside the world's API (an agent editing files directly) can't be
+replayed, only checkpointed; RL episodes checkpoint after every step when a run has components.
+
 ## Real clients: gog, gh, Hermes, OpenClaw
 
 Agents like OpenClaw and Hermes don't call MCP servers for Google and GitHub; they run CLIs
@@ -374,6 +407,7 @@ State lives in memory in one process: snapshots are for branching, not durabilit
 src/toolsim/
   core/          the engine: instances, clock, tools and validation, faults, MCP
   services/      one package per tool: service, model, tools by area, REST api, world actions, noise, importer
+  world/         the world runtime: components (directory, sqlite, remote protocol), journal, branches, diffs
   env.py         environments, runs, checks and grading
   issues.py      the issue library
   noise.py       shared pools for generated worlds; dispatches to each tool's noise.py

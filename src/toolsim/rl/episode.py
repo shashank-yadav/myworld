@@ -120,7 +120,7 @@ class ToolEnv:
         record: dict[str, Any] = {"n": len(self.steps) + 1, "tool": name, "arguments": args}
         terminated = False
         if name == "submit":
-            run.answer = str((args or {}).get("answer", "")) if isinstance(args, dict) else ""
+            run.submit(str((args or {}).get("answer", "")) if isinstance(args, dict) else "")
             content, is_error, terminated = "Submitted.", False, True
         elif not isinstance(args, dict):
             content, is_error = "Error: arguments must be a JSON object", True
@@ -137,6 +137,8 @@ class ToolEnv:
         else:
             content, is_error = self._call(run, name, args, record)
         record.update(content=content, is_error=is_error, at=run.clock.now.isoformat())
+        if run.components:  # directories and databases can change outside the journal: keep every step
+            record["checkpoint"] = run.checkpoint()
         self.steps.append(record)
         truncated = not terminated and len(self.steps) >= self.max_steps
         self.done = terminated or truncated

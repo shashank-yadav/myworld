@@ -502,9 +502,66 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
         answer = body.get("answer")
         if not isinstance(answer, str) or len(answer) > 100_000:
             raise bad_request(ValueError("answer must be a string (at most 100k characters)"))
-        with run.lock:
-            run.answer = answer
+        run.submit(answer)
         return run.grade()
+
+    # -- the world runtime: journal, checkpoints, branches, replays, diffs, mutations ----------
+
+    @app.get("/envs/{run_id}/journal")
+    def env_journal(run_id: str, since: int = 0) -> dict[str, Any]:
+        run = env_run(run_id)
+        return {"steps": len(run.journal), "checkpoints": sorted(run.world.checkpoints),
+                "journal": run.journal[max(0, since):]}
+
+    @app.post("/envs/{run_id}/checkpoint")
+    def env_checkpoint(run_id: str) -> dict[str, Any]:
+        return {"step": env_run(run_id).checkpoint()}
+
+    @app.post("/envs/{run_id}/branch")
+    def env_branch(request: Request, run_id: str, body: dict[str, Any] | None = Body(None)) -> dict[str, Any]:
+        """{"step": N, "id": "new-run"}: a new run as this one was after N journal entries."""
+        body = body or {}
+        run = env_run(run_id)
+        try:
+            step = body.get("step")
+            other = run.branch(None if step is None else int(step),
+                               _valid_id(body.get("id"), "run id") or f"{run.id}-b{uuid.uuid4().hex[:6]}")
+            host._register(other)
+        except (ValueError, TypeError) as e:
+            raise bad_request(e) from None
+        return {**describe_env(request, other), "branched_from": {"run": run.id, "step": len(other.journal)},
+                "diverged": other.diverged}
+
+    @app.post("/envs/{run_id}/replay")
+    def env_replay(run_id: str) -> dict[str, Any]:
+        """Re-run the journal from the start and report any step whose result differs."""
+        run = env_run(run_id)
+        diverged = run.replay()
+        return {"reproducible": not diverged, "steps": len(run.journal), "diverged": diverged}
+
+    @app.get("/envs/{run_id}/diff")
+    def env_diff(run_id: str, since: int = 0, until: int | None = None) -> dict[str, Any]:
+        try:
+            return {"since": since, "until": until, "changes": env_run(run_id).diff(since, until)}
+        except ValueError as e:
+            raise bad_request(e) from None
+
+    @app.post("/envs/{run_id}/mutate")
+    def env_mutate(run_id: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """{"component": "db", "op": "sql", "params": {...}}: a recorded change to any component
+        (for a server, ``op`` is one of its world actions)."""
+        run = env_run(run_id)
+        try:
+            result = run.mutate(str(body.get("component")), str(body.get("op")), **(body.get("params") or {}))
+        except (ValueError, TypeError, KeyError) as e:
+            raise bad_request(e) from None
+        return {"result": result, "step": len(run.journal)}
+
+    @app.get("/envs/{run_id}/components")
+    def env_components(run_id: str) -> dict[str, Any]:
+        run = env_run(run_id)
+        return {n: {"kind": c.kind, "mutations": c.mutations(), "state": c.view() if n in run.components else None}
+                for n, c in run.world.components.items()}
 
     # -- single instances -----------------------------------------------------------------------
 

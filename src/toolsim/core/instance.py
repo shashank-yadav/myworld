@@ -153,6 +153,7 @@ class Clock:
             raise ValueError("clock speed must be positive (1 = real time)")
         self.speed = speed
         self._wall = time.monotonic()
+        self.pin: dt.datetime | None = None  # replaying a real-time run: the next call happens at exactly this time
 
     @property
     def realtime(self) -> bool:
@@ -413,10 +414,14 @@ class Instance:
         identity it acts as (resolved per service; default: the service's default user)."""
         args = args or {}
         with self.lock:
-            if self._clock.realtime:
+            t0, mode = self.clock.isoformat(), "realtime" if self._clock.realtime else "virtual"
+            if self._clock.pin is not None:  # replaying a recorded real-time call
+                self.clock, self._clock.pin, mode = self._clock.pin, None, "realtime"
+            elif self._clock.realtime:
                 self._clock.sync()  # the call takes however long it really takes
             else:
                 self.advance(self.rng.randint(1, 3))  # a call takes a moment of (virtual) time
+            self._meta = {"as": as_, "t0": t0, "mode": mode, "raw": bool(tool is not None and tool.raw)}
             try:
                 actor = self.resolve_actor(as_)
             except ValueError as e:
@@ -467,7 +472,8 @@ class Instance:
             record: dict[str, Any] = {"seq": len(self.calls) + 1, "global_seq": self._clock.seq,
                                       "at": self.clock.isoformat(), "tool": name,
                                       "args": copy.deepcopy(args), "committed": False, "fault": None,
-                                      "agent": agent, "actor": self.actor}
+                                      "agent": agent, "actor": self.actor, **getattr(self, "_meta", {})}
+            self._meta = {}
             self.calls.append(record)
             t = tool or self.tools.get(name)
             if t is None:
