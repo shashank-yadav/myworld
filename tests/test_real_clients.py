@@ -45,7 +45,7 @@ def world(tmp_path_factory):
            os.environ["PATH"]}
 
     def sh(cmd: str) -> subprocess.CompletedProcess:
-        return subprocess.run(cmd, shell=True, env=env, capture_output=True, text=True, timeout=60)
+        return subprocess.run(cmd, shell=True, env=env, capture_output=True, text=True, timeout=60)  # noqa: S602  (fixed test commands)
     yield run, sh
     host.gateway.stop()
     shutil.rmtree(home, ignore_errors=True)
