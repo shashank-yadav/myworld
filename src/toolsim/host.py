@@ -536,6 +536,26 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
         return {**describe_env(request, other), "branched_from": {"run": run.id, "step": len(other.journal)},
                 "diverged": other.diverged}
 
+    @app.post("/envs/{run_id}/counterfactual")
+    def env_counterfactual(request: Request, run_id: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """{"step": N, "changes": [{"component", "op", "params"}], "replay_rest": true, "keep": false}:
+        what if the world had differed at step N? ``variants`` (a list of change lists) tries several."""
+        run = env_run(run_id)
+        variants = body.get("variants") or [body.get("changes") or []]
+        reports = []
+        try:
+            for n, changes in enumerate(variants):
+                other, report = run.counterfactual(int(body.get("step", 0)), changes,
+                                                   replay_rest=bool(body.get("replay_rest", True)),
+                                                   run_id=f"{run.id}-cf{n}-{uuid.uuid4().hex[:4]}")
+                if body.get("keep"):
+                    host._register(other)
+                    report["run"] = other.id
+                reports.append(report)
+        except (ValueError, TypeError) as e:
+            raise bad_request(e) from None
+        return {"reports": reports} if "variants" in body else reports[0]
+
     @app.post("/envs/{run_id}/replay")
     def env_replay(run_id: str) -> dict[str, Any]:
         """Re-run the journal from the start and report any step whose result differs."""

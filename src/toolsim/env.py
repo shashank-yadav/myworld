@@ -788,6 +788,33 @@ class EnvRun:
             other.diverged = diverged
             return other
 
+    def counterfactual(self, step: int, changes: list[dict[str, Any]], *, replay_rest: bool = True,
+                       run_id: str | None = None) -> tuple[EnvRun, dict[str, Any]]:
+        """What if the world had been different at ``step``? Branch there, apply ``changes``
+        ([{"component", "op", "params"}]: a mutation or a service's world action), then (by default)
+        replay the recorded actions that came after, and compare. Returns the new run and a report:
+        where results diverged and whether the outcome changed."""
+        with self.lock:
+            actual = self.grade()
+            other = self.branch(step, run_id or f"{self.id}-cf")
+        applied = []
+        for ch in changes:
+            if not isinstance(ch, dict) or not ch.get("component") or not ch.get("op"):
+                raise ValueError("each change needs a component and an op (with optional params)")
+            other.mutate(ch["component"], ch["op"], **copy.deepcopy(ch.get("params") or {}))
+            other.world.journal[-1]["counterfactual"] = True
+            applied.append(ch)
+        diverged = other._replay(self.world.journal[step:]) if replay_rest else []
+        after = other.grade()
+        report = {"step": step, "changes": applied, "replayed": len(self.world.journal) - step if replay_rest else 0,
+                  "diverged": diverged, "first_divergence": diverged[0]["step"] if diverged else None,
+                  "actual": {"score": actual["score"], "passed": actual["passed"]},
+                  "counterfactual": {"score": after["score"], "passed": after["passed"],
+                                     "failed": [c["name"] for c in after["checks"] if not c["passed"]]},
+                  "outcome_changed": (actual["score"], actual["passed"]) != (after["score"], after["passed"])}
+        other.diverged = diverged
+        return other, report
+
     def replay(self) -> list[dict[str, Any]]:
         """Re-run the whole journal from the first checkpoint and report where results differ from
         what happened (an empty list: the run is reproducible)."""
@@ -816,8 +843,8 @@ class EnvRun:
             inst = self.instances[e["component"]]
             if e.get("mode") == "realtime":
                 self.clock.pin = dt.datetime.fromisoformat(e["call_at"])
-            elif e.get("t0"):
-                self.clock.now = dt.datetime.fromisoformat(e["t0"])
+            elif e.get("t0"):  # never backwards (a counterfactual change may have taken a moment)
+                self.clock.now = max(self.clock.now, dt.datetime.fromisoformat(e["t0"]))
             tool = None
             if e.get("raw"):
                 from .api import resolve

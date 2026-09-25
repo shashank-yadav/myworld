@@ -266,3 +266,35 @@ def test_containers_via_docker(tmp_path, monkeypatch):
     assert "commit agent-box" in log and "rm -f agent-box" in log
     other.close()
     box.close()
+
+
+def test_counterfactuals():
+    spec = {"name": "meet", "servers": {"gmail": {}, "calendar": {"extend": {"auto_respond": {"john@acme.com": "accept"}}}},
+            "checks": [{"server": "calendar", "state": "events",
+                        "where": {"summary": "Q4 sync", "attendees": {"email": "john@acme.com",
+                                                                        "responseStatus": "accepted"}}}]}
+    run = EnvRun(Environment.from_dict(spec))
+    cal = run.instances["calendar"]
+    cal.call("create-event", {"summary": "Q4 sync", "start": "2026-09-22T10:00:00", "end": "2026-09-22T10:30:00",
+                              "attendees": [{"email": "john@acme.com"}]})
+    run.advance(3600)  # John accepts
+    run.instances["gmail"].call("send_email", {"to": ["john@acme.com"], "subject": "See you", "body": "."})
+    assert run.grade()["passed"]
+    # what if John had been unavailable (a busy block) before the invite? the recorded actions still
+    # run, but the outcome changes
+    same, report = run.counterfactual(0, [])
+    assert report["diverged"] == [] and not report["outcome_changed"], "no change: the same future"
+    other, report = run.counterfactual(1, [{"component": "calendar", "op": "respond",
+                                            "params": {"summary": "Q4 sync", "attendee": "john@acme.com",
+                                                       "response": "declined"}}], replay_rest=False)
+    assert report["outcome_changed"] and report["counterfactual"]["failed"]
+    assert other.journal[-1]["counterfactual"] is True and len(run.journal) == 3, "the original is untouched"
+    c = TestClient(create_app(config=HostConfig()))
+    c.post("/envs", json={"spec": SPEC, "id": "s"})
+    c.post("/envs/s/mutate", json={"component": "db", "op": "sql",
+                                   "params": {"statement": "UPDATE orders SET status='refunded' WHERE id=1"}})
+    out = c.post("/envs/s/counterfactual", json={"step": 0, "variants": [
+        [], [{"component": "db", "op": "sql", "params": {"statement": "DELETE FROM orders WHERE id=1"}}]]}).json()
+    first, second = out["reports"]
+    assert not first["outcome_changed"]
+    assert second["first_divergence"] == 0, "the recorded UPDATE now changes nothing"
