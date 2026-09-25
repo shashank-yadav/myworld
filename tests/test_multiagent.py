@@ -147,4 +147,7 @@ def test_single_agent_envs_still_work():
     a = Agent(c, run["agents"]["agent"])
     a.call("github", "get_pull_request_status", owner="acme", repo="api", pull_number=4)
     a.call("github", "merge_pull_request", owner="acme", repo="api", pull_number=4, merge_method="squash")
-    assert c.get("/envs/m/grade").json()["passed"]
+    assert not c.get("/envs/m/grade").json()["passed"], "no answer yet"
+    sha = c.get("/instances/m-github/state").json()["state"]["repos"]["acme/api"]["pulls"]["4"]["merge_commit_sha"]
+    graded = c.post("/envs/m/submit", json={"answer": f"Merged, commit {sha}"}).json()
+    assert graded["passed"] and graded["reward"] == 1.0

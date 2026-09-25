@@ -19,6 +19,10 @@ Realism gaps closed as new service versions (`2026-09-25.1`; the `2026-09-25` ve
 - **Drive:** Sheets (cells, A1 ranges, USER_ENTERED vs RAW, formulas, grid limits) and Docs tools.
 - **Noise and ambient activity** (`toolsim.noise`): seeded, realistic volume and distractors for Gmail,
   Slack, Calendar, GitHub, Jira and Drive, and background activity during a run, for per-episode variety.
+- **RL episodes** (`toolsim.rl.ToolEnv`): Gymnasium-style reset/step with a `submit` tool, rewards from
+  checks with `weight` (partial credit) and `must` (hard constraints), `answer` checks (including values
+  looked up in the final state), dense rewards, step penalties, fork/snapshot, trajectory export.
+  Over HTTP: `seed` on `POST /envs`, and `POST /envs/{id}/submit`.
 - Core: `ctx.schedule` for delayed world reactions (applied at their due time, included in snapshots);
   `@tool(since=…)` compares same-day revisions correctly.
 

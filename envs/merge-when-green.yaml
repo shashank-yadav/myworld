@@ -24,3 +24,6 @@ checks:
     server: github
     calls: create_pull_request
     count: 0
+  - name: reported the real merge commit SHA
+    answer:
+      contains: {server: github, state: "repos[acme/api].pulls", where: {number: 4}, field: merge_commit_sha}

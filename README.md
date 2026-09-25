@@ -1,12 +1,39 @@
 # toolsim
 
-Simulated replicas of the tools AI agents use (Gmail, Google Calendar, Slack, GitHub, Jira,
-Google Drive, and Linear and Notion in preview), for testing and training agents, alone or
-several at once, without touching the real systems.
+Real-world RL environments for agents: faithful, stateful replicas of the tools people work in
+(Gmail, Google Calendar, Slack, GitHub, Jira, Google Drive, and Linear and Notion in preview),
+with rewards computed from the resulting world.
 
-Most of these tools have no test mode. toolsim gives every agent run its own copy of each
-tool: same MCP tool names and schemas as the popular real MCP servers, realistic state,
-realistic errors, and failures you can inject on purpose.
+Most of these tools have no test mode, and toy environments don't transfer. toolsim gives every
+episode its own copy of each tool: the same MCP tool names and schemas as the popular real MCP
+servers, realistic state at realistic volume, a world that keeps moving, realistic errors, and
+failures you can inject on purpose. Every episode is deterministic given its seed and can be
+snapshotted and forked.
+
+## RL episodes
+
+```python
+from toolsim.rl import ToolEnv
+
+env = ToolEnv("envs/merge-when-green.yaml", max_steps=30)
+obs, info = env.reset(seed=7)                 # obs["task"], obs["tools"] (Anthropic/OpenAI-ready)
+obs, reward, terminated, truncated, info = env.step(
+    {"tool": "github__get_pull_request_status", "arguments": {"owner": "acme", "repo": "api", "pull_number": 4}})
+...
+env.step({"tool": "submit", "arguments": {"answer": "Merged #4 as 3f2a…"}})   # ends the episode
+env.trajectory()                              # steps, world events, answer, per-check grade, return
+```
+
+- **Rewards come from the world, not the transcript.** Checks inspect final state, calls and the
+  answer. `weight` gives partial credit, and `must: true` makes a check a hard constraint (reward 0 if
+  violated, e.g. "never emailed the attacker"). Rewards are sparse by default; `dense=True` pays the
+  change in score each step, and `step_penalty` charges per call.
+- **Randomized per episode:** `reset(seed=…)` rebuilds the world with that seed's generated noise
+  and background activity (see below). The same seed and the same actions give the same rollout.
+- **Branching:** `fork()` and `snapshot()`/`restore()` copy an episode mid-way, for tree search
+  or many rollouts from one hard state.
+- **Over HTTP** (remote trainers, MCP-native agents): `POST /envs {file|spec, seed}` returns MCP
+  URLs, the agent works through MCP, and `POST /envs/{id}/submit {answer}` returns the reward.
 
 ## Blocks
 

@@ -5,13 +5,14 @@ Agent-facing (per instance):
          ?agent=NAME&as=IDENTITY          which agent is calling, and which user it acts as
 
 Whole environments (several servers, several agents, one clock):
-    POST   /envs                          {spec | file, id?} -> per-agent MCP configs
+    POST   /envs                          {spec | file, id?, seed?} -> per-agent MCP configs
     POST   /envs/{id}/snapshot|restore|fork|reset   atomic across all servers
     GET    /envs/{id}/calls               one timeline of every agent's calls
     GET    /envs/{id}/timeline            calls and world events together
     POST   /envs/{id}/events              make something happen in the world now
     POST   /envs/{id}/advance             let virtual time pass (fires timed events)
-    GET    /envs/{id}/grade               run the environment's checks
+    GET    /envs/{id}/grade               run the environment's checks (score, reward, violations)
+    POST   /envs/{id}/submit              {answer} -> the agent's final answer; returns the grade
 
 Control plane (for test harnesses, RL loops and graders; agents never see it):
     GET    /services                      available services and their tools
@@ -35,6 +36,8 @@ bounded instances/snapshots/request sizes/fault delays.
 """
 
 from __future__ import annotations
+
+import dataclasses
 
 import hmac
 import logging
@@ -300,7 +303,8 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
 
     @app.post("/envs")
     def start_env(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
-        """{"spec": {...environment...}} or {"file": "name.yaml"} (from --env-dir); optional "id"."""
+        """{"spec": {...environment...}} or {"file": "name.yaml"} (from --env-dir); optional "id", and
+        "seed" to randomize this episode's world (noise, ambient activity, IDs)."""
         try:
             if body.get("file"):
                 env = Environment.load(host.resolve_env_file(str(body["file"])))
@@ -308,6 +312,10 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
                 env = Environment.from_dict(body["spec"], base_dir=None)  # inline specs can't read files
             else:
                 raise ValueError('send {"spec": {...}} or {"file": "name.yaml"}')
+            if body.get("seed") is not None:
+                if not isinstance(body["seed"], int) or isinstance(body["seed"], bool):
+                    raise ValueError("seed must be an integer")
+                env = dataclasses.replace(env, rng_seed=body["seed"])
             run = host.start_env(env, body.get("id"))
         except (KeyError, ValueError, TypeError, OSError) as e:
             raise bad_request(e) from None
@@ -408,6 +416,17 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
     @app.get("/envs/{run_id}/grade")
     def env_grade(run_id: str) -> dict[str, Any]:
         return env_run(run_id).grade()
+
+    @app.post("/envs/{run_id}/submit")
+    def env_submit(run_id: str, body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
+        """The agent's final answer; returns the grade (with ``reward``) for the finished episode."""
+        run = env_run(run_id)
+        answer = body.get("answer")
+        if not isinstance(answer, str) or len(answer) > 100_000:
+            raise bad_request(ValueError("answer must be a string (at most 100k characters)"))
+        with run.lock:
+            run.answer = answer
+        return run.grade()
 
     # -- single instances -----------------------------------------------------------------------
 

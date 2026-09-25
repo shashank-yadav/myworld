@@ -35,8 +35,16 @@ Several agents can share one environment, each acting as a different person::
 Each agent gets its own MCP URLs (``?agent=john&as=john@acme.com``); every call is attributed,
 and ``calls`` checks can filter with ``agent: john``.
 
-Checks look at the final **state** (what's true in the world) or at the **calls** the agent made
-(what it did). ``where`` matchers: plain values match exactly (lists: "contains all"), a key
+Checks look at the final **state** (what's true in the world), at the **calls** the agent made
+(what it did), or at its final **answer**. For RL, ``weight`` sets a check's share of the reward
+(partial credit) and ``must: true`` makes it a hard constraint: if it fails, the reward is 0::
+
+      - {name: never emailed the attacker, server: gmail, state: messages, where: {...}, count: 0, must: true}
+      - name: reported the merge commit
+        answer: {contains: {server: github, state: "repos[acme/api].pulls", where: {number: 4}, field: merge_commit_sha}}
+        weight: 2
+
+``answer`` takes ``contains`` (text, or a value looked up in the final state) or ``matches`` (a regex). ``where`` matchers: plain values match exactly (lists: "contains all"), a key
 ending in ``~`` matches a case-insensitive substring, dotted keys reach into nested objects and
 lists. Bounds: ``count``, ``min``, ``max``.
 """
@@ -101,10 +109,19 @@ class Environment:
             if f.get("server") not in servers:
                 raise ValueError(f"fault targets unknown server {f.get('server')!r}")
         for c in spec.get("checks") or []:
-            if c.get("server") not in servers:
+            if sum(k in c for k in ("state", "calls", "answer")) != 1:
+                raise ValueError(f"check {c.get('name')!r} needs exactly one of `state`, `calls` or `answer`")
+            if "answer" in c:
+                a = c["answer"]
+                if not isinstance(a, dict) or not ({"contains", "matches"} & set(a)):
+                    raise ValueError(f"check {c.get('name')!r}: answer needs `contains` or `matches`")
+                ref = a.get("contains")
+                if isinstance(ref, dict) and ref.get("server") not in servers:
+                    raise ValueError(f"check {c.get('name')!r} looks up unknown server {ref.get('server')!r}")
+            elif c.get("server") not in servers:
                 raise ValueError(f"check {c.get('name')!r} targets unknown server {c.get('server')!r}")
-            if ("state" in c) == ("calls" in c):
-                raise ValueError(f"check {c.get('name')!r} needs exactly one of `state` or `calls`")
+            if c.get("weight") is not None and (not isinstance(c["weight"], (int, float)) or c["weight"] < 0):
+                raise ValueError(f"check {c.get('name')!r}: weight must be a non-negative number")
         for n, ev in enumerate(spec.get("events") or []):
             _validate_event(ev, n, servers)
         agents = spec.get("agents") or {"agent": {"task": spec.get("task", "")}}
@@ -185,10 +202,17 @@ class Environment:
                             version=self.version_for(s))
                 for s in self.servers}
 
-    def grade(self, worlds: dict[str, dict[str, Any]]) -> dict[str, Any]:
-        """``worlds[server] = {"state": ..., "calls": [...]}``: the end of a run."""
+    def grade(self, worlds: dict[str, dict[str, Any]], answer: str | None = None) -> dict[str, Any]:
+        """``worlds[server] = {"state": ..., "calls": [...]}``: the end of a run. ``answer`` is the
+        agent's final answer, if any. ``score`` is the weighted share of checks passed; ``reward``
+        is the score, or 0 if a ``must`` check failed."""
         results = []
         for c in self.checks:
+            if "answer" in c:
+                ok, detail = self._answer_ok(c["answer"], worlds, answer)
+                results.append({"name": c.get("name") or "answer", "passed": ok, "matched": int(ok),
+                                "expected": detail, "weight": float(c.get("weight", 1)), "must": bool(c.get("must"))})
+                continue
             world = worlds[c["server"]]
             if "state" in c:
                 view = SERVICES[self.service_for(c["server"])]().grading_view(world["state"])
@@ -206,9 +230,28 @@ class Environment:
             if all(c.get(k) is None for k in ("count", "min", "max")):
                 ok = n >= 1
             results.append({"name": c.get("name") or _describe(c), "passed": ok, "matched": n,
-                            "expected": {k: c[k] for k in ("count", "min", "max") if k in c} or {"min": 1}})
-        return {"environment": self.name, "passed": all(r["passed"] for r in results),
-                "score": sum(r["passed"] for r in results) / len(results) if results else 1.0, "checks": results}
+                            "expected": {k: c[k] for k in ("count", "min", "max") if k in c} or {"min": 1},
+                            "weight": float(c.get("weight", 1)), "must": bool(c.get("must"))})
+        total = sum(r["weight"] for r in results)
+        score = sum(r["weight"] for r in results if r["passed"]) / total if total else 1.0
+        violated = [r["name"] for r in results if r["must"] and not r["passed"]]
+        return {"environment": self.name, "passed": all(r["passed"] for r in results), "score": score,
+                "reward": 0.0 if violated else score, "violations": violated, "checks": results}
+
+    def _answer_ok(self, spec: dict[str, Any], worlds: dict[str, dict[str, Any]],
+                   answer: str | None) -> tuple[bool, dict[str, Any]]:
+        text = answer or ""
+        if "matches" in spec:
+            return bool(re.search(str(spec["matches"]), text, re.I | re.S)), {"matches": spec["matches"]}
+        want = spec["contains"]
+        if isinstance(want, dict):  # a value from the final state, e.g. the merge commit SHA
+            view = SERVICES[self.service_for(want["server"])]().grading_view(worlds[want["server"]]["state"])
+            hits = [i for i in _collection(view, want["state"]) if _match(i, want.get("where") or {})]
+            values = [v for i in hits for v in _values(i, want["field"])] if want.get("field") else hits
+            values = [str(v) for v in values if v not in (None, "")]
+            ok = bool(values) and all(v.lower() in text.lower() for v in values[:1])
+            return ok, {"contains": values[:1] or "(nothing in the final state)"}
+        return str(want).lower() in text.lower(), {"contains": want}
 
 
 def _read_yaml(path: Path) -> Any:
@@ -371,6 +414,7 @@ class EnvRun:
         self.fired: list[int] = []
         self.matches: dict[int, int] = {}
         self.events = env.world_events()
+        self.answer: str | None = None  # the agent's final answer, once it submits one
         self.instances = {s: Instance(get_service(env.service_for(s)), env.seed_for(s), rng_seed=env.rng_seed,
                                       faults=env.faults_for(s), instance_id=f"{self.id}-{s}",
                                       version=env.version_for(s), clock=self.clock, lock=self.lock, hooks=self)
@@ -395,7 +439,7 @@ class EnvRun:
     def reset(self) -> None:
         with self._all_locked():
             self.clock.now, self.clock.seq = self.start, 0
-            self.fired, self.matches = [], {}
+            self.fired, self.matches, self.answer = [], {}, None
             for inst in self.instances.values():
                 inst.reset()
             self._due_by_time()
@@ -403,6 +447,7 @@ class EnvRun:
     def snapshot(self) -> dict[str, Any]:
         with self._all_locked():
             return {"clock": self.clock.now.isoformat(), "seq": self.clock.seq, "fired": list(self.fired),
+                    "answer": self.answer,
                     "matches": dict(self.matches), "instances": {s: i.snapshot() for s, i in self.instances.items()}}
 
     def restore(self, snap: dict[str, Any]) -> None:
@@ -411,6 +456,7 @@ class EnvRun:
                 i.restore(snap["instances"][s])
             self.clock.now, self.clock.seq = dt.datetime.fromisoformat(snap["clock"]), snap["seq"]
             self.fired = list(snap.get("fired", []))
+            self.answer = snap.get("answer")
             self.matches = {int(k): v for k, v in snap.get("matches", {}).items()}
 
     # -- world events ------------------------------------------------------------------------
@@ -487,9 +533,9 @@ class EnvRun:
     def worlds(self) -> dict[str, dict[str, Any]]:
         return {s: {"state": i.state, "calls": i.calls} for s, i in self.instances.items()}
 
-    def grade(self) -> dict[str, Any]:
+    def grade(self, answer: str | None = None) -> dict[str, Any]:
         with self._all_locked():
-            return self.env.grade(self.worlds())
+            return self.env.grade(self.worlds(), answer if answer is not None else self.answer)
 
     def agent_configs(self, base_url: str) -> dict[str, Any]:
         """What to give each agent: its task and MCP server URLs carrying its identity."""

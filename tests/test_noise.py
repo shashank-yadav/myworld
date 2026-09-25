@@ -103,8 +103,9 @@ def test_careful_agent_still_passes_in_a_noisy_world():
     o = {"owner": "acme", "repo": "api", "pull_number": 4}
     assert json.loads(gh.call("get_pull_request_status", o).text)["state"] == "success"
     gh.call("merge_pull_request", {**o, "merge_method": "squash"})  # times out after committing
-    assert json.loads(gh.call("get_pull_request", o).text)["merged"]
-    assert run.grade()["passed"]
+    pr = json.loads(gh.call("get_pull_request", o).text)
+    assert pr["merged"]
+    assert run.grade(answer=f"Merged: {pr['merge_commit_sha']}")["passed"]
 
 
 def test_bad_specs():

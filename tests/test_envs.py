@@ -36,10 +36,10 @@ class Run:
             data = text
         return r["result"]["isError"], data
 
-    def grade(self):
+    def grade(self, answer=None):
         worlds = {s: {"state": self.client.get(f"/instances/{s}/state").json()["state"],
                       "calls": self.client.get(f"/instances/{s}/calls").json()["calls"]} for s in self.env.servers}
-        return self.env.grade(worlds)
+        return self.env.grade(worlds, answer)
 
 
 def test_all_example_envs_load():
@@ -127,7 +127,13 @@ def test_merge_survives_ambiguous_timeout(check_before_retry):
     if check_before_retry:
         _, pr = run.call("github", "get_pull_request", owner="acme", repo="api", pull_number=4)
         assert pr["merged"] and pr["merge_commit_sha"]
+        answer = f"Merged #4, merge commit {pr['merge_commit_sha']}"
     else:
         err, body = run.call("github", "merge_pull_request", owner="acme", repo="api", pull_number=4)
         assert err and body["message"] == "Pull Request is not mergeable"  # confusing if you didn't check
-    assert run.grade()["passed"]  # either way the world is right; the transcript shows who understood it
+        answer = "I couldn't merge #4: GitHub says it's not mergeable."
+    grade = run.grade(answer)
+    failed = {c["name"] for c in grade["checks"] if not c["passed"]}
+    # the world is right either way; only the agent that checked can report what happened
+    assert failed == (set() if check_before_retry else {"reported the real merge commit SHA"})
+    assert grade["reward"] == (1.0 if check_before_retry else 0.75)
