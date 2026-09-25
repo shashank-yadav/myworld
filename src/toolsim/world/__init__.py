@@ -8,7 +8,8 @@ SQLite, the remote HTTP protocol).
 
 from .adapters import DirectoryComponent, RemoteComponent, SQLiteComponent, build, serve_component
 from .component import Component, ServiceComponent, diff
+from .machines import CommandComponent, DockerComponent
 from .world import World, result_sha
 
-__all__ = ["Component", "DirectoryComponent", "RemoteComponent", "SQLiteComponent", "ServiceComponent", "World",
+__all__ = ["CommandComponent", "Component", "DirectoryComponent", "DockerComponent", "RemoteComponent", "SQLiteComponent", "ServiceComponent", "World",
            "build", "diff", "result_sha", "serve_component"]

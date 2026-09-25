@@ -140,8 +140,8 @@ class Environment:
         for name, comp in components.items():
             if name in servers:
                 raise ValueError(f"component {name!r} has the same name as a server")
-            if (comp or {}).get("type") not in ("directory", "sqlite", "remote"):
-                raise ValueError(f"component {name!r}: type must be directory, sqlite or remote")
+            if (comp or {}).get("type") not in ("directory", "sqlite", "remote", "command", "docker"):
+                raise ValueError(f"component {name!r}: type must be directory, sqlite, remote, command or docker")
         targets = {**servers, **components}
         for name, cfg in servers.items():
             service = (cfg or {}).get("service", name)

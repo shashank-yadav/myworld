@@ -333,8 +333,15 @@ def build(spec: dict[str, Any], base_dir: Path | None) -> Component:
         return DirectoryComponent(path, spec.get("files"))
     if kind == "sqlite":
         return SQLiteComponent(path, spec.get("sql"))
+    if kind in ("remote", "command", "docker") and base_dir is None:
+        raise ValueError(f"{kind} components aren't allowed in inline specs (they reach outside the host)")
     if kind == "remote":
-        if base_dir is None:
-            raise ValueError("remote components aren't allowed in inline specs")
         return RemoteComponent(spec["url"])
-    raise ValueError(f"unknown component type {kind!r} (directory, sqlite or remote)")
+    if kind == "command":
+        from .machines import CommandComponent
+        return CommandComponent(spec["commands"], spec.get("handle"), float(spec.get("timeout", 300)))
+    if kind == "docker":
+        from .machines import DockerComponent
+        return DockerComponent(spec["image"], spec.get("name"), docker=spec.get("docker", "docker"),
+                               workdir=spec.get("workdir", "/"))
+    raise ValueError(f"unknown component type {kind!r} (directory, sqlite, remote, command or docker)")

@@ -1,6 +1,7 @@
 """The world runtime: components, journal, checkpoints, branches, replays, diffs, evaluation."""
 
 import time
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -215,3 +216,53 @@ def test_runs_move_between_hosts_and_survive_restarts(tmp_path):
     assert loaded.status_code == 200 and restarted.get("/envs/back/journal").json()["steps"] == 1
     assert restarted.post("/envs/load", json={"name": "nope"}).status_code == 400
     assert b.post("/envs/s2/save", json={"name": "x"}).status_code == 400, "no store configured"
+
+
+def test_any_machine_with_a_cli_is_a_component(tmp_path):
+    from toolsim.world import CommandComponent
+    box = tmp_path / "box"
+    box.mkdir()
+    (box / "app.cfg").write_text("mode=a\n")
+    machine = CommandComponent({
+        "snapshot": "tar -C {dir} -cf - . | base64",
+        "restore": "find {dir} -mindepth 1 -delete && echo {snapshot} | base64 -d | tar -C {dir} -xf -",
+        "clone": 'd=$(mktemp -d) && tar -C {dir} -cf - . | tar -C "$d" -xf - && printf \'{{"dir": "%s"}}\' "$d"',
+        "view": "cd {dir} && for f in $(find . -type f | sort); do echo \"$f $(cat $f)\"; done",
+        "mutate.set": "printf %s {line} > {dir}/app.cfg",
+    }, handle={"dir": str(box)})
+    w = World()
+    w.add("box", machine)
+    cp = w.checkpoint()
+    w.mutate("box", "set", line="mode=b")
+    assert w.view()["box"]["lines"] == ["./app.cfg mode=b"]
+    other = w.branch(cp)
+    assert other.view()["box"]["lines"] == ["./app.cfg mode=a"], "a clone restored to the checkpoint"
+    assert (box / "app.cfg").read_text() == "mode=b"
+    w.restore(w.checkpoints[cp])
+    assert (box / "app.cfg").read_text() == "mode=a\n"
+    assert [m["name"] for m in machine.mutations()] == ["set"]
+
+
+def test_containers_via_docker(tmp_path, monkeypatch):
+    import sys as _sys
+    from toolsim.world import DockerComponent
+    fake = tmp_path / "docker"
+    fake.write_text(f"#!/bin/sh\nexec {_sys.executable} {Path(__file__).parent / 'fake_docker.py'} \"$@\"\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("FAKE_DOCKER_HOME", str(tmp_path / "dh"))
+    box = DockerComponent("python:3.12-slim", name="agent-box", docker=str(fake))
+    w = World()
+    w.add("box", box)
+    cp = w.checkpoint()
+    assert w.checkpoints[cp]["components"]["box"]["snapshot"].startswith("sha256:"), "an image layer"
+    w.mutate("box", "write", path="work/todo.txt", content="ship it\n")
+    assert w.view()["box"]["lines"] == ["A /work/todo.txt"]
+    assert w.mutate("box", "exec", cmd="cat work/todo.txt") == "ship it"
+    other = w.branch(cp)
+    assert other.view()["box"]["lines"] == [], "the branch is a new container from the checkpoint image"
+    w.restore(w.checkpoints[cp])
+    assert w.view()["box"]["lines"] == []
+    log = (tmp_path / "dh" / "log.txt").read_text()
+    assert "commit agent-box" in log and "rm -f agent-box" in log
+    other.close()
+    box.close()
