@@ -13,7 +13,12 @@
     env.trajectory()                           # the whole rollout, JSON-ready
 
 Tools are named ``<server>__<tool>`` (valid for OpenAI and Anthropic tool names), plus ``submit``,
-which ends the episode with the agent's final answer. The reward comes from the environment's
+which ends the episode with the agent's final answer, and ``wait`` (unless ``allow_wait=False``),
+which lets simulated time pass so CI can finish or a reply can arrive.
+
+Time is virtual: episodes run as fast as the agent can act, and time only moves when something
+takes time (each call takes 1-3 s, ``wait``, latency faults). To count the model's own thinking
+time, pass ``elapsed`` (seconds) to ``step``. The reward comes from the environment's
 checks, which look at the resulting world, never at what the agent claims: the weighted share of
 checks passed, or 0 if a ``must`` check (a hard constraint) failed. Rewards are sparse (given
 when the episode ends) unless ``dense=True``, which pays the change in score after every step.
@@ -38,12 +43,17 @@ SUBMIT = {"name": "submit", "description": "Finish the task and give your final 
           "input_schema": {"type": "object", "properties": {"answer": {"type": "string",
                                                                        "description": "Your final answer or summary"}},
                            "required": ["answer"], "additionalProperties": False}}
+WAIT = {"name": "wait", "description": "Wait before doing anything else, e.g. for CI to finish or for a reply "
+                                     "to arrive. Time passes and the world moves on.",
+        "input_schema": {"type": "object", "properties": {"seconds": {"type": "number", "minimum": 1, "maximum": 3600,
+                                                                      "description": "How long to wait (1-3600)"}},
+                         "required": ["seconds"], "additionalProperties": False}}
 SEP = "__"
 
 
 class ToolEnv:
     def __init__(self, env: Environment | str | Path | dict[str, Any], *, agent: str | None = None,
-                 max_steps: int = 50, dense: bool = False, step_penalty: float = 0.0):
+                 max_steps: int = 50, dense: bool = False, step_penalty: float = 0.0, allow_wait: bool = True):
         if isinstance(env, (str, Path)):
             env = Environment.load(env)
         elif isinstance(env, dict):
@@ -52,7 +62,7 @@ class ToolEnv:
         self.agent = agent or next(iter(env.agents))
         if self.agent not in env.agents:
             raise ValueError(f"unknown agent {self.agent!r}; this environment has {', '.join(env.agents)}")
-        self.max_steps, self.dense, self.step_penalty = max_steps, dense, step_penalty
+        self.max_steps, self.dense, self.step_penalty, self.allow_wait = max_steps, dense, step_penalty, allow_wait
         self.run: EnvRun | None = None
         self.seed: int | None = None
         self._reset_state()
@@ -87,13 +97,19 @@ class ToolEnv:
             for t in run.instances[server].list_tools():
                 out.append({"name": f"{server}{SEP}{t['name']}", "description": t["description"],
                             "input_schema": t["inputSchema"]})
-        return out + [SUBMIT]
+        return out + ([WAIT] if self.allow_wait else []) + [SUBMIT]
 
-    def step(self, action: dict[str, Any]) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
-        """``action``: ``{"tool": name, "arguments": {...}}`` (``name``/``input`` also accepted)."""
+    def step(self, action: dict[str, Any], elapsed: float | None = None
+             ) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
+        """``action``: ``{"tool": name, "arguments": {...}}`` (``name``/``input`` also accepted).
+        ``elapsed``: seconds the agent spent before this action (model thinking), in virtual time."""
         run = self._need_run()
         if self.done:
             raise RuntimeError("the episode is over; call reset()")
+        if elapsed:
+            if not 0 < elapsed <= 86400:
+                raise ValueError("elapsed must be between 0 and 86400 seconds")
+            run.advance(float(elapsed))
         name = str(action.get("tool") or action.get("name") or "")
         args = action.get("arguments", action.get("input")) or {}
         if isinstance(args, str):
@@ -108,6 +124,16 @@ class ToolEnv:
             content, is_error, terminated = "Submitted.", False, True
         elif not isinstance(args, dict):
             content, is_error = "Error: arguments must be a JSON object", True
+        elif name == "wait" and self.allow_wait:
+            try:
+                seconds = float(args.get("seconds"))
+            except (TypeError, ValueError):
+                seconds = -1
+            if not 1 <= seconds <= 3600:
+                content, is_error = "Error: seconds must be a number from 1 to 3600", True
+            else:
+                run.advance(seconds)
+                content, is_error = f"Waited {seconds:g} seconds. It is now {run.clock.now.isoformat()}.", False
         else:
             content, is_error = self._call(run, name, args, record)
         record.update(content=content, is_error=is_error, at=run.clock.now.isoformat())

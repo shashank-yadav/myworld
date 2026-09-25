@@ -58,7 +58,7 @@ from . import __version__
 from .core import mcp
 from .core.faults import TransportFault
 from .core.instance import Instance
-from .env import Environment, EnvRun
+from .env import Environment, EnvRun, parse_time
 from .services import SERVICES, get_service
 
 log = logging.getLogger("toolsim.host")
@@ -77,6 +77,7 @@ class HostConfig:
     max_hang_s: float = 120.0                 # cap on real-time fault delays
     max_delay_s: float = 7 * 86400            # cap on virtual fault delays
     max_body_bytes: int = 10 * 1024 * 1024
+    speed: float | None = None                # default clock: None = virtual (fast), 1 = real time, 60 = 60x
 
 
 def _valid_id(value: str | None, what: str) -> str | None:
@@ -102,6 +103,8 @@ class Host:
 
     def start_env(self, env: Environment, run_id: str | None = None) -> EnvRun:
         self.check_faults(env.faults)
+        if not env.time_set and self.config.speed is not None:
+            env = dataclasses.replace(env, speed=self.config.speed)
         run = EnvRun(env, _valid_id(run_id, "environment run id") or f"{env.name}-{uuid.uuid4().hex[:6]}")
         return self._register(run)
 
@@ -123,7 +126,7 @@ class Host:
 
     def create(self, service: str, seed: dict[str, Any] | None = None, *, rng_seed: int = 0,
                faults: list[dict[str, Any]] | None = None, instance_id: str | None = None,
-               version: str | None = None) -> Instance:
+               version: str | None = None, speed: float | None | str = "default") -> Instance:
         self.check_faults(faults)
         iid = _valid_id(instance_id, "instance id") or f"{service}-{uuid.uuid4().hex[:8]}"
         with self._lock:  # check before building: seeds can be large
@@ -131,7 +134,7 @@ class Host:
                 raise ValueError(f"instance {iid} already exists")
             self._room_for(1)
         inst = Instance(get_service(service), seed, rng_seed=int(rng_seed), faults=faults, instance_id=iid,
-                        version=version)
+                        version=version, speed=self.config.speed if speed == "default" else speed)
         with self._lock:
             if iid in self.instances:
                 raise ValueError(f"instance {iid} already exists")
@@ -296,7 +299,9 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
 
     def describe_env(request: Request, run: EnvRun) -> dict[str, Any]:
         base = str(request.base_url).rstrip("/")
+        run.tick()
         return {"id": run.id, "environment": run.env.name, "now": run.clock.now.isoformat(), "calls": run.clock.seq,
+                "time": {"mode": "realtime", "speed": run.clock.speed} if run.clock.realtime else {"mode": "virtual"},
                 "servers": {s: {"instance": i.id, "service": i.service.name, "version": i.version}
                             for s, i in run.instances.items()},
                 "agents": run.agent_configs(base)}
@@ -304,7 +309,8 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
     @app.post("/envs")
     def start_env(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
         """{"spec": {...environment...}} or {"file": "name.yaml"} (from --env-dir); optional "id", and
-        "seed" to randomize this episode's world (noise, ambient activity, IDs)."""
+        "seed" to randomize this episode's world (noise, ambient activity, IDs), and "time"
+        ("virtual", "realtime" or {"speed": N}) to override the clock mode."""
         try:
             if body.get("file"):
                 env = Environment.load(host.resolve_env_file(str(body["file"])))
@@ -316,6 +322,8 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
                 if not isinstance(body["seed"], int) or isinstance(body["seed"], bool):
                     raise ValueError("seed must be an integer")
                 env = dataclasses.replace(env, rng_seed=body["seed"])
+            if "time" in body:
+                env = dataclasses.replace(env, speed=parse_time(body["time"]), time_set=True)
             run = host.start_env(env, body.get("id"))
         except (KeyError, ValueError, TypeError, OSError) as e:
             raise bad_request(e) from None
@@ -379,6 +387,7 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
         """One timeline: every agent's calls across every server, in order."""
         run = env_run(run_id)
         with run.lock:
+            run.tick()
             return {"calls": run.calls()}
 
     @app.get("/envs/{run_id}/timeline")
@@ -386,6 +395,7 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
         """Agent calls and world events together, in order."""
         run = env_run(run_id)
         with run.lock:
+            run.tick()
             return {"timeline": run.timeline()}
 
     @app.post("/envs/{run_id}/advance")
@@ -415,7 +425,9 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
 
     @app.get("/envs/{run_id}/grade")
     def env_grade(run_id: str) -> dict[str, Any]:
-        return env_run(run_id).grade()
+        run = env_run(run_id)
+        run.tick()
+        return run.grade()
 
     @app.post("/envs/{run_id}/submit")
     def env_submit(run_id: str, body: dict[str, Any] = Body(default_factory=dict)) -> dict[str, Any]:
@@ -446,7 +458,8 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
             if spec.get("seed") is not None and not isinstance(spec["seed"], dict):
                 raise ValueError("seed must be an object")
             i = host.create(spec["service"], spec.get("seed"), rng_seed=spec.get("rng_seed", 0),
-                            faults=spec.get("faults"), instance_id=spec.get("id"), version=spec.get("version"))
+                            faults=spec.get("faults"), instance_id=spec.get("id"), version=spec.get("version"),
+                            speed=parse_time(spec["time"]) if "time" in spec else "default")
         except (KeyError, ValueError, TypeError) as e:
             raise bad_request(e) from None
         return _describe(request, i)
@@ -468,6 +481,7 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
     def state(instance_id: str) -> dict[str, Any]:
         i = inst(instance_id)
         with i.lock:
+            i.tick()
             return {"id": i.id, "service": i.service.name, "now": i.now().isoformat(), "state": i.state}
 
     @app.get("/instances/{instance_id}/calls")

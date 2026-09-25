@@ -81,6 +81,8 @@ class Environment:
     now: str | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
     ambient: dict[str, Any] | None = None  # background activity, generated per rng_seed (see toolsim.noise)
+    speed: float | None = None  # None: virtual time (fast, deterministic); 1: real time; 60: a minute per second
+    time_set: bool = False      # whether the spec chose a clock (otherwise a host may apply its default)
 
     @classmethod
     def load(cls, path: str | Path) -> Environment:
@@ -137,7 +139,8 @@ class Environment:
                    faults=spec.get("faults") or [], checks=spec.get("checks") or [],
                    description=spec.get("description", ""), rng_seed=spec.get("rng_seed", 0), base_dir=base_dir,
                    agents={k: v or {} for k, v in agents.items()}, now=spec.get("now"),
-                   events=list(spec.get("events") or []), ambient=_ambient_spec(spec.get("ambient"), servers))
+                   events=list(spec.get("events") or []), ambient=_ambient_spec(spec.get("ambient"), servers),
+                   speed=parse_time(spec.get("time")), time_set="time" in spec)
 
     def agent_servers(self, agent: str) -> list[str]:
         return list(self.agents[agent].get("servers") or self.servers)
@@ -291,6 +294,24 @@ def _offset(value: Any, start: dt.datetime) -> dt.datetime:
     return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
 
 
+def parse_time(value: Any) -> float | None:
+    """The clock speed for ``time:``: ``virtual`` (default: fast and deterministic) -> None,
+    ``realtime`` -> 1.0, ``{speed: 60}`` or ``60`` -> 60x real time."""
+    if value in (None, "virtual", "fast", "superfast"):
+        return None
+    if value in ("realtime", "real"):
+        return 1.0
+    if isinstance(value, dict):
+        if value.get("mode", "realtime") == "virtual":
+            return None
+        if value.get("mode", "realtime") != "realtime":
+            raise ValueError("time.mode must be 'virtual' or 'realtime'")
+        value = value.get("speed", 1)
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not 0 < value <= 100_000:
+        raise ValueError("time must be 'virtual', 'realtime', or a speed between 0 and 100000 (1 = real time)")
+    return float(value)
+
+
 def _ambient_spec(spec: Any, servers: dict[str, Any]) -> dict[str, Any] | None:
     if not spec:
         return None
@@ -412,7 +433,7 @@ class EnvRun:
         self.env = env
         self.id = run_id or env.name
         self.start = dt.datetime.fromisoformat(str(env.now or DEFAULT_NOW).replace("Z", "+00:00"))
-        self.clock = Clock(self.start)
+        self.clock = Clock(self.start, speed=env.speed)
         self.lock = threading.RLock()  # one lock for the whole world: calls and events never interleave
         self.fired: list[int] = []
         self.matches: dict[int, int] = {}
@@ -442,6 +463,7 @@ class EnvRun:
     def reset(self) -> None:
         with self._all_locked():
             self.clock.now, self.clock.seq = self.start, 0
+            self.clock.reanchor()
             self.fired, self.matches, self.answer = [], {}, None
             for inst in self.instances.values():
                 inst.reset()
@@ -458,6 +480,7 @@ class EnvRun:
             for s, i in self.instances.items():
                 i.restore(snap["instances"][s])
             self.clock.now, self.clock.seq = dt.datetime.fromisoformat(snap["clock"]), snap["seq"]
+            self.clock.reanchor()
             self.fired = list(snap.get("fired", []))
             self.answer = snap.get("answer")
             self.matches = {int(k): v for k, v in snap.get("matches", {}).items()}
@@ -470,7 +493,13 @@ class EnvRun:
         self.instances[ev["server"]].apply_action(ev["action"], ev.get("params"), as_=ev.get("as"),
                                                   source=f"{ev.get('name') or 'event ' + str(n + 1)} ({source})")
 
+    def tick(self) -> None:
+        """Bring the world up to date (realtime mode: wall time passes, due events fire)."""
+        with self.lock:
+            self._due_by_time()
+
     def _due_by_time(self) -> None:
+        self.clock.sync()
         for inst in self.instances.values():
             inst.run_due()
         for n, ev in enumerate(self.events):

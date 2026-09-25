@@ -206,6 +206,19 @@ and forks include which ones have fired. A harness can also inject events into a
 (`POST /envs/{id}/events`) and let virtual time pass (`POST /envs/{id}/advance`).
 `GET /envs/{id}/timeline` shows agent calls and world events together.
 
+## Time: virtual or realtime
+
+- **virtual** (default): as fast as possible and deterministic. Time moves only when something
+  takes time: each call (1-3 s), `wait` in RL episodes, `step(..., elapsed=s)` for model thinking,
+  `POST /envs/{id}/advance`, latency faults. Use it for RL and tests.
+- **realtime**: simulated time follows the wall clock, so a live agent that thinks for 30 s sees
+  30 s pass, and CI, replies and timed events arrive on schedule, even between calls. Speed it up
+  with a factor (`60` = a simulated minute per real second). Use it for live agents over MCP and demos.
+  Not deterministic.
+
+Set it per environment (`time: realtime`, `time: {speed: 60}`), per run (`POST /envs {"time": ...}`),
+or as a host default (`toolsim serve --time realtime`, `toolsim stdio gmail --time 60`).
+
 ## Volume, distractors and background activity
 
 Real workspaces are noisy, and agents that ace five hand-written items often fail at real volume.

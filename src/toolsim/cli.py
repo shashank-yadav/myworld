@@ -124,9 +124,10 @@ def cmd_import(args: argparse.Namespace) -> None:
 def cmd_stdio(args: argparse.Namespace) -> None:
     from .core.instance import Instance
     from .core.mcp import serve_stdio
+    from .env import parse_time
     from .services import get_service
     inst = Instance(get_service(args.service), _load(args.seed), rng_seed=args.rng_seed, faults=_load(args.faults),
-                    version=args.tool_version)
+                    version=args.tool_version, speed=parse_time(args.time))
     serve_stdio(inst)
 
 
@@ -136,7 +137,7 @@ def cmd_serve(args: argparse.Namespace) -> None:
 
     import uvicorn
 
-    from .env import Environment
+    from .env import Environment, parse_time
     from .host import Host, HostConfig, create_app
 
     token = args.token or os.environ.get("TOOLSIM_TOKEN")
@@ -146,7 +147,7 @@ def cmd_serve(args: argparse.Namespace) -> None:
     logging.basicConfig(level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     config = HostConfig(token=token, allowed_origins=args.allow_origin or [],
                         env_dirs=[Path(d) for d in (args.env_dir or [])], max_instances=args.max_instances,
-                        max_hang_s=args.max_hang)
+                        max_hang_s=args.max_hang, speed=parse_time(args.time))
     host = Host(config)
     base = f"http://{args.host}:{args.port}"
     for path in args.env or []:
@@ -183,6 +184,13 @@ def cmd_grade(args: argparse.Namespace) -> None:
     sys.exit(0 if report["passed"] else 1)
 
 
+def _time_arg(v: str) -> str | float:
+    try:
+        return float(v)
+    except ValueError:
+        return v
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="toolsim", description="Simulated tools for testing and training AI agents.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -201,6 +209,9 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--max-instances", type=int, default=2000)
     s.add_argument("--max-hang", type=float, default=120.0, help="cap on real-time fault delays (seconds)")
     s.add_argument("--log-level", default="info", choices=["debug", "info", "warning", "error"])
+    s.add_argument("--time", type=_time_arg, default=None,
+                   help="clock for envs/instances that don't set one: virtual (default, fast), realtime, or a speed "
+                        "like 60 (a simulated minute per real second)")
     s.set_defaults(fn=cmd_serve)
 
     s = sub.add_parser("stdio", help="serve one instance over stdio")
@@ -209,6 +220,7 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--faults", help="faults file (YAML/JSON list)")
     s.add_argument("--rng-seed", type=int, default=0)
     s.add_argument("--version", dest="tool_version", help="service version date (default: latest)")
+    s.add_argument("--time", type=_time_arg, default=None, help="virtual (default), realtime, or a speed like 60")
     s.set_defaults(fn=cmd_stdio)
 
     s = sub.add_parser("import", help="build a seed from an export of a real tool")

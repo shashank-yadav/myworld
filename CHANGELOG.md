@@ -4,6 +4,11 @@ Service behavior is versioned separately by date (`toolsim versions`); this file
 
 ## Unreleased
 
+- **Clock modes:** virtual (fast, deterministic; the default) and realtime (follows the wall clock, optionally
+  accelerated; events fire between calls). RL episodes get a `wait` tool and `step(..., elapsed=)`.
+- **Layout:** one package per tool (`services/<tool>/`: service, model, tools by area, actions, noise,
+  importer) and a `toolsim.rl` package (episodes, task families).
+
 Realism gaps closed as new service versions (`2026-09-25.1`; the `2026-09-25` versions are unchanged):
 - **Gmail:** bounces for unknown addresses and typo'd domains, out-of-office and rule-based auto-replies
   (once per sender), daily send quota (429).

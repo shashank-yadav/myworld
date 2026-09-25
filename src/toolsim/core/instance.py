@@ -124,12 +124,42 @@ def _clone(value: Any) -> Any:
 
 
 class Clock:
-    """Virtual time plus a global call counter. Instances in one environment share a clock, so
-    timestamps line up across services and calls from every agent form one ordered timeline."""
+    """Simulated time plus a global call counter. Instances in one environment share a clock, so
+    timestamps line up across services and calls from every agent form one ordered timeline.
 
-    def __init__(self, now: dt.datetime):
+    Two modes:
+
+    - **virtual** (``speed=None``, the default): as fast as possible and deterministic. Time moves
+      only when something takes time: each call (1-3 s), explicit waits/advances, latency faults.
+      Right for RL and tests.
+    - **realtime** (``speed=1``) or accelerated (``speed=60``: a minute per second): simulated time
+      also follows the wall clock, so a live agent that thinks for 30 s sees 30 s pass, and CI,
+      replies and timed events arrive on schedule. Right for live agents over MCP and demos. Not
+      deterministic.
+    """
+
+    def __init__(self, now: dt.datetime, speed: float | None = None):
         self.now = now
         self.seq = 0
+        if speed is not None and speed <= 0:
+            raise ValueError("clock speed must be positive (1 = real time)")
+        self.speed = speed
+        self._wall = time.monotonic()
+
+    @property
+    def realtime(self) -> bool:
+        return self.speed is not None
+
+    def sync(self) -> None:
+        """Let wall-clock time pass into simulated time (realtime mode only)."""
+        if self.speed:
+            t = time.monotonic()
+            self.now += dt.timedelta(seconds=(t - self._wall) * self.speed)
+            self._wall = t
+
+    def reanchor(self) -> None:
+        """After jumping to a saved time (reset/restore), count wall time from now."""
+        self._wall = time.monotonic()
 
 
 @dataclass
@@ -142,7 +172,7 @@ class CallResult:
 class Instance:
     def __init__(self, service: Service, seed: dict[str, Any] | None = None, *, rng_seed: int = 0,
                  faults: list[dict[str, Any]] | None = None, instance_id: str | None = None,
-                 version: str | None = None, clock: Clock | None = None,
+                 version: str | None = None, clock: Clock | None = None, speed: float | None = None,
                  lock: threading.RLock | None = None, hooks: Any = None):
         self.service = service
         self.version = service.resolve_version(version)
@@ -155,7 +185,8 @@ class Instance:
         self.tools = {t.name: t for t in service.tools if t.in_version(self.version)}
         self._actor: str | None = None
         self._shared_clock = clock is not None
-        self._clock = clock or Clock(dt.datetime.fromisoformat(str(self.seed.get("now") or DEFAULT_NOW).replace("Z", "+00:00")))
+        self._clock = clock or Clock(dt.datetime.fromisoformat(str(self.seed.get("now") or DEFAULT_NOW).replace("Z", "+00:00")),
+                                     speed=speed)
         self.reset()
 
     @property
@@ -177,6 +208,7 @@ class Instance:
                 now = self.seed.get("now") or DEFAULT_NOW
                 self.clock = dt.datetime.fromisoformat(str(now).replace("Z", "+00:00"))
                 self._clock.seq = 0
+                self._clock.reanchor()
             self.counters: dict[str, int] = {}
             self.calls: list[dict[str, Any]] = []
             self.events: list[dict[str, Any]] = []  # world events applied to this instance
@@ -205,6 +237,7 @@ class Instance:
             self.state = snap["state"]
             self.clock = dt.datetime.fromisoformat(snap["clock"])
             self._clock.seq = snap.get("seq", self._clock.seq)
+            self._clock.reanchor()
             self.counters = snap["counters"]
             rng = snap["rng"]
             self.rng.setstate((rng[0], tuple(rng[1]), rng[2]) if isinstance(rng, list) else rng)
@@ -304,6 +337,16 @@ class Instance:
     def advance(self, seconds: float) -> None:
         self.clock += dt.timedelta(seconds=seconds)
 
+    def tick(self) -> None:
+        """Bring the world up to date: in realtime mode, let wall time pass and fire what's due.
+        (Calls do this themselves; readers like graders call it first.)"""
+        with self.lock:
+            if self.hooks:
+                self.hooks.tick()
+            else:
+                self._clock.sync()
+                self.run_due()
+
     def next(self, name: str, start: int = 1) -> int:
         self.counters[name] = self.counters.get(name, start - 1) + 1
         return self.counters[name]
@@ -339,7 +382,10 @@ class Instance:
         identity it acts as (resolved per service; default: the service's default user)."""
         args = args or {}
         with self.lock:
-            self.advance(self.rng.randint(1, 3))  # a call takes a moment of (virtual) time
+            if self._clock.realtime:
+                self._clock.sync()  # the call takes however long it really takes
+            else:
+                self.advance(self.rng.randint(1, 3))  # a call takes a moment of (virtual) time
             try:
                 actor = self.resolve_actor(as_)
             except ValueError as e:
@@ -362,6 +408,7 @@ class Instance:
             raise ValueError(f"{self.service.name} has no action {name!r}; "
                              f"available: {', '.join(a.name for a in self.service.actions) or 'none'}")
         with self.lock:
+            self._clock.sync()
             if advance:
                 self.advance(1)  # world events take a moment too, and so are strictly ordered in time
             actor = self.resolve_actor(as_)
