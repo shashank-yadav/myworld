@@ -12,6 +12,7 @@ import json
 import sys
 from typing import Any, TextIO
 
+from .faults import TransportFault
 from .instance import Instance
 
 SUPPORTED_VERSIONS = ["2025-06-18", "2025-03-26", "2024-11-05"]
@@ -53,6 +54,8 @@ def handle(instance: Instance, msg: Any, *, agent: str | None = None, as_: str |
         if method == "prompts/list":
             return _ok(mid, {"prompts": []})
         return _error(mid, -32601, f"Method not found: {method}")
+    except TransportFault:
+        raise  # not an MCP answer at all: the transport layer decides what the client sees
     except Exception as e:  # a bug in a fake must look like a server error, not kill the transport
         return _error(mid, -32603, f"Internal error: {type(e).__name__}: {e}")
 
@@ -77,7 +80,11 @@ def serve_stdio(instance: Instance, stdin: TextIO = sys.stdin, stdout: TextIO = 
         except ValueError:
             resp: Any = _error(None, -32700, "Parse error")
         else:
-            resp = handle(instance, msg, agent=agent, as_=as_)
+            try:
+                resp = handle(instance, msg, agent=agent, as_=as_)
+            except TransportFault as e:  # over stdio, a dead upstream looks like a JSON-RPC server error
+                resp = _error(msg.get("id") if isinstance(msg, dict) else None, -32000,
+                              f"Upstream connection failed (HTTP {e.status})")
         if resp is not None:
             stdout.write(json.dumps(resp) + "\n")
             stdout.flush()

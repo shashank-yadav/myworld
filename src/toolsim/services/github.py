@@ -33,7 +33,7 @@ import hashlib
 from typing import Annotated, Any, Literal
 
 from ..core.instance import Instance, Service
-from ..core.tools import ToolError, tool
+from ..core.tools import ToolError, action, tool
 
 API = "https://api.github.com"
 
@@ -168,6 +168,9 @@ class GitHub(Service):
             if u["type"] == "User" and q in (u["login"].lower(), (u.get("email") or "").lower(), u["name"].lower()):
                 return u["login"]
         raise ValueError(f"no GitHub user {identity} in this environment")
+
+    def error_shape(self, status: int, message: str) -> Any:
+        return {"message": message, "documentation_url": "https://docs.github.com/rest", "status": str(status)}
 
     def fault_error(self, fault: Any) -> tuple[Any, int]:
         if fault.kind == "rate_limit":
@@ -1078,3 +1081,54 @@ GitHub.tools = [create_or_update_file, push_files, search_repositories, create_r
                 add_issue_comment, search_code, search_issues, search_users, list_commits, get_issue, get_pull_request,
                 list_pull_requests, create_pull_request_review, merge_pull_request, get_pull_request_files,
                 get_pull_request_status, update_pull_request_branch, get_pull_request_comments, get_pull_request_reviews]
+
+
+# -- world actions (triggered by environments, never by agents) --------------------------
+
+def _repo_named(state: dict[str, Any], full_name: str) -> dict[str, Any]:
+    owner, _, name = full_name.partition("/")
+    return _repo(state, owner, name)
+
+
+@action("set_status")
+def act_set_status(ctx: Instance, repo: str, ref: str, context: str, state: str, description: str = "") -> None:
+    """CI reports a status on a branch or commit (e.g. flips from success to failure)."""
+    if state not in ("success", "failure", "error", "pending"):
+        raise _unprocessable(f"invalid state {state}")
+    r = _repo_named(ctx.state, repo)
+    sha = r["branches"].get(ref, ref)
+    sts = [x for x in r["statuses"].get(sha, []) if x["context"] != context]
+    r["statuses"][sha] = sts + [{"context": context, "state": state, "description": description}]
+
+
+@action("push_commit")
+def act_push_commit(ctx: Instance, repo: str, branch: str, files: dict, author: str, message: str = "Update") -> str:
+    """A teammate pushes to a branch (e.g. main moves under an open PR, causing a conflict)."""
+    s = ctx.state
+    r = s["repos"].get(repo) or (_ for _ in ()).throw(_not_found())
+    head = _branch(r, branch)
+    tree = dict(r["commits"][head]["tree"])
+    tree.update({p: _put_blob(s, c) for p, c in files.items()})
+    r["branches"][branch] = _commit(ctx, s, r, tree, [head], message, author)
+    return r["branches"][branch]
+
+
+@action("add_comment")
+def act_add_comment(ctx: Instance, repo: str, number: int, author: str, body: str) -> None:
+    """A teammate comments on an issue or pull request."""
+    r = _repo_named(ctx.state, repo)
+    _issue(r, number)
+    _user(ctx, ctx.state, author)
+    _comment(ctx, r, number, author, body)
+
+
+@action("set_issue_state")
+def act_set_issue_state(ctx: Instance, repo: str, number: int, state: str) -> None:
+    """Someone opens or closes an issue."""
+    r = _repo_named(ctx.state, repo)
+    i = _issue(r, number)
+    i["state"] = state
+    i["closed_at"] = _iso(ctx) if state == "closed" else None
+
+
+GitHub.actions = [act_set_status, act_push_commit, act_add_comment, act_set_issue_state]

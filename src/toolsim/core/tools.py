@@ -146,3 +146,18 @@ def _coerce(name: str, v: Any, s: dict[str, Any]) -> Any:
     if "enum" in s and v not in s["enum"]:
         raise ToolError({"error": f"Invalid value for {name}: must be one of {s['enum']}"})
     return v
+
+
+@dataclass
+class Action:
+    """A change the *world* makes (mail arriving, a colleague booking a slot, CI finishing).
+    Actions are never exposed to agents; environments trigger them as events."""
+    name: str
+    fn: Callable[..., Any]
+    description: str
+
+
+def action(name: str | None = None) -> Callable[[Callable[..., Any]], Action]:
+    def wrap(fn: Callable[..., Any]) -> Action:
+        return Action(name=name or fn.__name__, fn=fn, description=inspect.cleandoc(fn.__doc__ or ""))
+    return wrap

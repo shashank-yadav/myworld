@@ -11,6 +11,7 @@ timestamps and fault draws on every run. That's what makes runs comparable and f
 
 from __future__ import annotations
 
+import contextlib
 import copy
 import datetime as dt
 import json
@@ -20,12 +21,14 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Iterator
 
-from .faults import Fault, parse_faults
-from .tools import Tool, ToolError, validate_args
+from .faults import Fault, TransportFault, parse_faults
+from .tools import Action, Tool, ToolError, validate_args
 
 DEFAULT_NOW = "2026-09-21T16:00:00+00:00"  # Monday 09:00 in San Francisco
+_REASONS = {404: "Not Found", 429: "Too Many Requests", 500: "Internal Server Error", 502: "Bad Gateway",
+            503: "Service Unavailable", 504: "Gateway Timeout"}
 
 
 class Service:
@@ -35,6 +38,7 @@ class Service:
     title: ClassVar[str] = ""
     description: ClassVar[str] = ""
     tools: ClassVar[list[Tool]] = []
+    actions: ClassVar[list[Action]] = []  # world events environments can trigger (never agent-visible)
     # Date-based versions, oldest first: {"2026-09-25": "what changed"}. A version is a frozen
     # contract: tool definitions and behavior. Any change ships as a new date; old dates keep
     # working (gate changes on ``ctx.version`` or ``@tool(since=..., until=...)``).
@@ -99,6 +103,10 @@ class Service:
         """State as checks see it. Services add derived facts agents never see (e.g. which channel)."""
         return state
 
+    def error_shape(self, status: int, message: str) -> Any:
+        """This service's native error body for an HTTP status (used by reliability faults)."""
+        return {"error": {"code": status, "message": message}}
+
     def render(self, value: Any) -> str:
         return value if isinstance(value, str) else json.dumps(value, indent=2, default=str)
 
@@ -122,14 +130,16 @@ class CallResult:
 class Instance:
     def __init__(self, service: Service, seed: dict[str, Any] | None = None, *, rng_seed: int = 0,
                  faults: list[dict[str, Any]] | None = None, instance_id: str | None = None,
-                 version: str | None = None, clock: Clock | None = None):
+                 version: str | None = None, clock: Clock | None = None,
+                 lock: threading.RLock | None = None, hooks: Any = None):
         self.service = service
         self.version = service.resolve_version(version)
         self.id = instance_id or f"{service.name}-{uuid.uuid4().hex[:8]}"
         self.seed = copy.deepcopy(seed) if seed is not None else service.default_seed()
         self.rng_seed = rng_seed
         self.fault_specs = faults or []
-        self.lock = threading.RLock()
+        self.lock = lock or threading.RLock()  # an environment shares one lock across its instances
+        self.hooks = hooks  # before_call(inst, tool, args, agent) / after_call(inst, record), set by EnvRun
         self.tools = {t.name: t for t in service.tools if t.in_version(self.version)}
         self._actor: str | None = None
         self._shared_clock = clock is not None
@@ -150,12 +160,14 @@ class Instance:
         """Back to the seed: same state, same clock, same future IDs."""
         with self.lock:
             self.rng = random.Random(self.rng_seed)
+            self.start_time = dt.datetime.fromisoformat(str(self.seed.get("now") or DEFAULT_NOW).replace("Z", "+00:00"))
             if not self._shared_clock:  # a shared clock is reset by its environment
                 now = self.seed.get("now") or DEFAULT_NOW
                 self.clock = dt.datetime.fromisoformat(str(now).replace("Z", "+00:00"))
                 self._clock.seq = 0
             self.counters: dict[str, int] = {}
             self.calls: list[dict[str, Any]] = []
+            self.events: list[dict[str, Any]] = []  # world events applied to this instance
             self.faults = parse_faults(self.fault_specs)
             self.state = self.service.initial_state(copy.deepcopy(self.seed), self)
 
@@ -164,7 +176,8 @@ class Instance:
         with self.lock:
             return copy.deepcopy({
                 "state": self.state, "clock": self.clock.isoformat(), "seq": self._clock.seq, "counters": self.counters,
-                "rng": self.rng.getstate(), "calls": self.calls, "faults": [f.to_dict() for f in self.faults],
+                "rng": self.rng.getstate(), "calls": self.calls, "events": self.events,
+                "faults": [f.to_dict() for f in self.faults],
             })
 
     def restore(self, snap: dict[str, Any]) -> None:
@@ -177,6 +190,7 @@ class Instance:
             rng = snap["rng"]
             self.rng.setstate((rng[0], tuple(rng[1]), rng[2]) if isinstance(rng, list) else rng)
             self.calls = snap["calls"]
+            self.events = snap.get("events", [])
             self.faults = [Fault(**f) for f in snap["faults"]]
 
     def set_faults(self, specs: list[dict[str, Any]]) -> None:
@@ -217,6 +231,20 @@ class Instance:
     def list_tools(self) -> list[dict[str, Any]]:
         return [t.mcp_definition() for t in self.tools.values()]
 
+    @contextlib.contextmanager
+    def _acting(self, actor: str | None) -> Iterator[None]:
+        self._actor = actor
+        key = self.service.actor_key
+        swapped = key is not None and actor is not None and self.state.get(key) != actor
+        if swapped:
+            default, self.state[key] = self.state[key], actor
+        try:
+            yield
+        finally:
+            if swapped:
+                self.state[key] = default
+            self._actor = None
+
     def call(self, name: str, args: dict[str, Any] | None, *, agent: str | None = None,
              as_: str | None = None) -> CallResult:
         """One tool call. ``agent`` names the calling agent (for attribution); ``as_`` is the
@@ -228,17 +256,35 @@ class Instance:
                 actor = self.resolve_actor(as_)
             except ValueError as e:
                 return CallResult(f"Error: {e}", True)
-            self._actor = actor
-            key = self.service.actor_key
-            swapped = key is not None and actor is not None and self.state.get(key) != actor
-            if swapped:
-                default, self.state[key] = self.state[key], actor
-            try:
-                return self._call(name, args, agent)
-            finally:
-                if swapped:
-                    self.state[key] = default
-                self._actor = None
+            if self.hooks:
+                self.hooks.before_call(self, name, args, agent)
+            with self._acting(actor):
+                result = self._call(name, args, agent)
+            if self.hooks and self.calls:
+                self.hooks.after_call(self, self.calls[-1])
+            return result
+
+    def apply_action(self, name: str, params: dict[str, Any] | None = None, *, as_: str | None = None,
+                     source: str = "event") -> Any:
+        """Make the world change (not an agent call). Raises ValueError on bad actions or params."""
+        act = next((a for a in self.service.actions if a.name == name), None)
+        if act is None:
+            raise ValueError(f"{self.service.name} has no action {name!r}; "
+                             f"available: {', '.join(a.name for a in self.service.actions) or 'none'}")
+        with self.lock:
+            self.advance(1)  # world events take a moment too, and so are strictly ordered in time
+            actor = self.resolve_actor(as_)
+            with self._acting(actor):
+                try:
+                    result = act.fn(self, **(params or {}))
+                except ToolError as e:
+                    raise ValueError(f"{self.service.name}.{name}: {self.service.render(e.payload)}") from None
+                except TypeError as e:
+                    raise ValueError(f"{self.service.name}.{name}: {e}") from None
+            self._clock.seq += 1
+            self.events.append({"global_seq": self._clock.seq, "at": self.clock.isoformat(), "event": name,
+                                "params": copy.deepcopy(params or {}), "as": actor, "source": source})
+            return result
 
     def _call(self, name: str, args: dict[str, Any], agent: str | None) -> CallResult:
         with self.lock:
@@ -252,29 +298,52 @@ class Instance:
             if t is None:
                 return self._finish(record, CallResult(f"Unknown tool: {name}", True))
 
-            fault = next((f for f in self.faults if f.matches(name) and f.should_fire(self.rng)), None)
+            fault = next((f for f in self.faults if f.matches(name) and f.should_fire(self.rng, self.clock, self.start_time)),
+                         None)
             if fault is not None:
                 record["fault"] = fault.kind
                 if fault.hang_s:
                     time.sleep(fault.hang_s)
-                if fault.kind not in ("timeout_after_commit", "latency"):
-                    payload, _ = self.service.fault_error(fault)
+                if fault.delay_s:
+                    self.advance(fault.delay_s)
+                if fault.kind == "transport_error":
+                    status = fault.status or 502
+                    record["ok"], record["result"] = False, f"HTTP {status}"
+                    raise TransportFault(status, f"<html><head><title>{status} {_REASONS.get(status, 'Error')}</title>"
+                                                 f"</head><body><h1>{status} {_REASONS.get(status, 'Error')}</h1></body></html>")
+                if fault.kind not in ("timeout_after_commit", "latency", "truncated", "duplicate_commit"):
+                    payload = self._fault_payload(fault)
                     return self._finish(record, CallResult(self.service.render(payload), True, payload))
 
             before = None if t.read_only else copy.deepcopy(self.state)
             try:
                 value = t.fn(self, **validate_args(t, args))
+                if fault is not None and fault.kind == "duplicate_commit" and not t.read_only:
+                    t.fn(self, **validate_args(t, args))  # the proxy retried; the caller never knows
                 record["committed"] = not t.read_only
                 result = CallResult(self.service.render(value), False, value)
+                if fault is not None and fault.kind == "truncated":
+                    cut = max(1, int(len(result.text) * 0.6))
+                    result = CallResult(result.text[:cut], False, result.text[:cut])
             except ToolError as e:
                 if before is not None:
                     self.state = before  # failed calls leave no partial writes
                 result = CallResult(self.service.render(e.payload), True, e.payload)
 
             if fault is not None and fault.kind == "timeout_after_commit":
-                payload, _ = self.service.fault_error(fault)
+                payload = self._fault_payload(fault)
                 result = CallResult(self.service.render(payload), True, payload)
             return self._finish(record, result)
+
+    def _fault_payload(self, fault: Fault) -> Any:
+        simple = {"not_found": (404, "Not Found"), "unavailable": (503, "Service Unavailable"),
+                  "bad_gateway": (502, "Bad Gateway")}
+        if fault.kind in simple:
+            status, msg = simple[fault.kind]
+            return self.service.error_shape(status, msg)
+        if fault.kind == "server_error" and fault.status not in (None, 500):
+            return self.service.error_shape(fault.status, _REASONS.get(fault.status, "Server Error"))
+        return self.service.fault_error(fault)[0]
 
     def _finish(self, record: dict[str, Any], result: CallResult) -> CallResult:
         record["ok"] = not result.is_error

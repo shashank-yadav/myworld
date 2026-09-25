@@ -8,6 +8,9 @@ Whole environments (several servers, several agents, one clock):
     POST   /envs                          {spec | file, id?} -> per-agent MCP configs
     POST   /envs/{id}/snapshot|restore|fork|reset   atomic across all servers
     GET    /envs/{id}/calls               one timeline of every agent's calls
+    GET    /envs/{id}/timeline            calls and world events together
+    POST   /envs/{id}/events              make something happen in the world now
+    POST   /envs/{id}/advance             let virtual time pass (fires timed events)
     GET    /envs/{id}/grade               run the environment's checks
 
 Control plane (for test harnesses, RL loops and graders; agents never see it):
@@ -34,6 +37,7 @@ from fastapi import Body, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 
 from .core import mcp
+from .core.faults import TransportFault
 from .core.instance import Instance
 from .env import Environment, EnvRun
 from .services import SERVICES, get_service
@@ -118,7 +122,10 @@ def create_app(host: Host | None = None) -> FastAPI:
             except ValueError as e:
                 return JSONResponse({"jsonrpc": "2.0", "id": msg.get("id") if isinstance(msg, dict) else None,
                                      "error": {"code": -32001, "message": str(e)}}, status_code=403)
-        resp = mcp.handle(i, msg, agent=agent, as_=as_)
+        try:
+            resp = mcp.handle(i, msg, agent=agent, as_=as_)
+        except TransportFault as e:  # what a real proxy in front of a dead service returns
+            return Response(e.body, status_code=e.status, media_type="text/html")
         if resp is None:
             return Response(status_code=202)
         headers = {}
@@ -214,6 +221,30 @@ def create_app(host: Host | None = None) -> FastAPI:
     def env_calls(run_id: str) -> dict[str, Any]:
         """One timeline: every agent's calls across every server, in order."""
         return {"calls": env_run(run_id).calls()}
+
+    @app.get("/envs/{run_id}/timeline")
+    def env_timeline(run_id: str) -> dict[str, Any]:
+        """Agent calls and world events together, in order."""
+        return {"timeline": env_run(run_id).timeline()}
+
+    @app.post("/envs/{run_id}/advance")
+    def env_advance(run_id: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """{"seconds": 600}: let time pass; timed events that become due fire."""
+        run = env_run(run_id)
+        try:
+            run.advance(float(body["seconds"]))
+        except (KeyError, ValueError) as e:
+            raise HTTPException(400, str(e)) from None
+        return {"now": run.clock.now.isoformat()}
+
+    @app.post("/envs/{run_id}/events")
+    def env_inject(run_id: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """{"server", "action", "params", "as"?}: make something happen in the world right now."""
+        try:
+            result = env_run(run_id).inject(body["server"], body["action"], body.get("params"), body.get("as"))
+        except (KeyError, ValueError) as e:
+            raise HTTPException(400, str(e)) from None
+        return {"ok": True, "result": result}
 
     @app.get("/envs/{run_id}/grade")
     def env_grade(run_id: str) -> dict[str, Any]:

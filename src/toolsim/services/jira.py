@@ -24,7 +24,7 @@ import re
 from typing import Annotated, Any
 
 from ..core.instance import Instance, Service
-from ..core.tools import ToolError, tool
+from ..core.tools import ToolError, action, tool
 
 SITE = "https://acme.atlassian.net"
 STATUSES = {"To Do": "new", "In Progress": "indeterminate", "In Review": "indeterminate", "Done": "done"}
@@ -132,6 +132,9 @@ class Jira(Service):
             return _resolve_user(state, identity)  # account id, email or display name
         except ToolError:
             raise ValueError(f"no Jira user {identity} on this site") from None
+
+    def error_shape(self, status: int, message: str) -> Any:
+        return {"errorMessages": [message], "errors": {}}
 
     def fault_error(self, fault: Any) -> tuple[Any, int]:
         if fault.kind == "rate_limit":
@@ -841,3 +844,34 @@ Jira.tools = [jira_search, jira_get_issue, jira_create_issue, jira_batch_create_
               jira_delete_issue, jira_assign_issue, jira_transition_issue, jira_get_transitions, jira_add_comment,
               jira_add_worklog, jira_get_all_projects, jira_get_project_issues, jira_create_issue_link, jira_link_to_epic,
               jira_get_user_profile]
+
+
+# -- world actions (triggered by environments, never by agents) --------------------------
+
+@action("set_status")
+def act_set_status(ctx: Instance, issue_key: str, status: str) -> None:
+    """Someone moves an issue (bypassing the agent's view of the workflow)."""
+    if status not in STATUSES:
+        raise _err(f"unknown status {status}")
+    i = _get(ctx.state, issue_key)
+    i["status"] = status
+    done = STATUSES[status] == "done"
+    i["resolution"], i["resolutiondate"] = ("Done", _iso(ctx)) if done else (None, None)
+    i["updated"] = _iso(ctx)
+
+
+@action("add_comment")
+def act_add_comment(ctx: Instance, issue_key: str, author: str, body: str) -> None:
+    """A colleague comments on an issue."""
+    _comment(ctx, _get(ctx.state, issue_key), _resolve_user(ctx.state, author), body)
+
+
+@action("assign")
+def act_assign(ctx: Instance, issue_key: str, assignee: str | None) -> None:
+    """Someone reassigns an issue."""
+    i = _get(ctx.state, issue_key)
+    i["assignee"] = _resolve_user(ctx.state, assignee)
+    i["updated"] = _iso(ctx)
+
+
+Jira.actions = [act_set_status, act_add_comment, act_assign]

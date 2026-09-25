@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import contextlib
 import datetime as dt
+import threading
 import re
 import urllib.parse
 from dataclasses import dataclass, field
@@ -69,6 +70,7 @@ class Environment:
     base_dir: Path = Path(".")
     agents: dict[str, dict[str, Any]] = field(default_factory=dict)
     now: str | None = None
+    events: list[dict[str, Any]] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: str | Path) -> Environment:
@@ -77,6 +79,8 @@ class Environment:
 
     @classmethod
     def from_dict(cls, spec: dict[str, Any], base_dir: Path = Path(".")) -> Environment:
+        from .issues import expand_issues
+        spec = expand_issues(spec)  # `issues:` become events, faults and checks
         servers = spec.get("servers") or {}
         if isinstance(servers, list):
             servers = {s: {} for s in servers}
@@ -93,6 +97,8 @@ class Environment:
                 raise ValueError(f"check {c.get('name')!r} targets unknown server {c.get('server')!r}")
             if ("state" in c) == ("calls" in c):
                 raise ValueError(f"check {c.get('name')!r} needs exactly one of `state` or `calls`")
+        for n, ev in enumerate(spec.get("events") or []):
+            _validate_event(ev, n, servers)
         agents = spec.get("agents") or {"agent": {"task": spec.get("task", "")}}
         for name, a in agents.items():
             unknown = set((a or {}).get("servers") or []) - set(servers)
@@ -104,7 +110,8 @@ class Environment:
         return cls(name=spec["name"], task=spec.get("task", ""), servers={k: v or {} for k, v in servers.items()},
                    faults=spec.get("faults") or [], checks=spec.get("checks") or [],
                    description=spec.get("description", ""), rng_seed=spec.get("rng_seed", 0), base_dir=base_dir,
-                   agents={k: v or {} for k, v in agents.items()}, now=spec.get("now"))
+                   agents={k: v or {} for k, v in agents.items()}, now=spec.get("now"),
+                   events=list(spec.get("events") or []))
 
     def agent_servers(self, agent: str) -> list[str]:
         return list(self.agents[agent].get("servers") or self.servers)
@@ -170,6 +177,38 @@ class Environment:
                             "expected": {k: c[k] for k in ("count", "min", "max") if k in c} or {"min": 1}})
         return {"environment": self.name, "passed": all(r["passed"] for r in results),
                 "score": sum(r["passed"] for r in results) / len(results) if results else 1.0, "checks": results}
+
+
+TRIGGERS = ("at", "before", "after", "after_calls")
+
+
+def _validate_event(ev: dict[str, Any], n: int, servers: dict[str, Any]) -> None:
+    label = ev.get("name") or f"event {n + 1}"
+    if ev.get("server") not in servers:
+        raise ValueError(f"{label}: unknown server {ev.get('server')!r}")
+    if not ev.get("action"):
+        raise ValueError(f"{label}: needs an action")
+    from .services import SERVICES
+    service = SERVICES[(servers[ev["server"]] or {}).get("service", ev["server"])]
+    if ev["action"] not in {a.name for a in service.actions}:
+        raise ValueError(f"{label}: {service.name} has no action {ev['action']!r}; "
+                         f"available: {', '.join(a.name for a in service.actions)}")
+    given = [t for t in TRIGGERS if t in ev]
+    if len(given) > 1:
+        raise ValueError(f"{label}: use one trigger, not {', '.join(given)}")
+    for key in ("before", "after"):
+        if key in ev and ev[key].get("server") and ev[key]["server"] not in servers:
+            raise ValueError(f"{label}: {key}.server {ev[key]['server']!r} is not in this environment")
+
+
+def _offset(value: Any, start: dt.datetime) -> dt.datetime:
+    """'+10m' / '+2h' / '+30s' from the start, or an ISO timestamp."""
+    v = str(value).strip()
+    m = re.fullmatch(r"\+(\d+(?:\.\d+)?)([smhd])", v)
+    if m:
+        return start + dt.timedelta(seconds=float(m.group(1)) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)])
+    t = dt.datetime.fromisoformat(v.replace("Z", "+00:00"))
+    return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
 
 
 def _merge(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
@@ -269,10 +308,14 @@ class EnvRun:
         self.id = run_id or env.name
         self.start = dt.datetime.fromisoformat(str(env.now or DEFAULT_NOW).replace("Z", "+00:00"))
         self.clock = Clock(self.start)
+        self.lock = threading.RLock()  # one lock for the whole world: calls and events never interleave
+        self.fired: list[int] = []
+        self.matches: dict[int, int] = {}
         self.instances = {s: Instance(get_service(env.service_for(s)), env.seed_for(s), rng_seed=env.rng_seed,
                                       faults=env.faults_for(s), instance_id=f"{self.id}-{s}",
-                                      version=env.version_for(s), clock=self.clock)
+                                      version=env.version_for(s), clock=self.clock, lock=self.lock, hooks=self)
                           for s in env.servers}
+        self._server_of = {id(i): s for s, i in self.instances.items()}
         for agent in env.agents:  # fail fast on identities that don't exist in the seeded world
             for server in env.agent_servers(agent):
                 ident = env.identity_for(agent, server)
@@ -281,30 +324,93 @@ class EnvRun:
                         self.instances[server].resolve_actor(ident)
                     except ValueError as e:
                         raise ValueError(f"agent {agent!r} on {server}: {e}") from None
+        with self.lock:
+            self._due_by_time()  # events without a trigger are part of the starting world
 
     @contextlib.contextmanager
     def _all_locked(self):
-        with contextlib.ExitStack() as stack:
-            for name in sorted(self.instances):
-                stack.enter_context(self.instances[name].lock)
+        with self.lock:
             yield
 
     def reset(self) -> None:
         with self._all_locked():
             self.clock.now, self.clock.seq = self.start, 0
+            self.fired, self.matches = [], {}
             for inst in self.instances.values():
                 inst.reset()
+            self._due_by_time()
 
     def snapshot(self) -> dict[str, Any]:
         with self._all_locked():
-            return {"clock": self.clock.now.isoformat(), "seq": self.clock.seq,
-                    "instances": {s: i.snapshot() for s, i in self.instances.items()}}
+            return {"clock": self.clock.now.isoformat(), "seq": self.clock.seq, "fired": list(self.fired),
+                    "matches": dict(self.matches), "instances": {s: i.snapshot() for s, i in self.instances.items()}}
 
     def restore(self, snap: dict[str, Any]) -> None:
         with self._all_locked():
             for s, i in self.instances.items():
                 i.restore(snap["instances"][s])
             self.clock.now, self.clock.seq = dt.datetime.fromisoformat(snap["clock"]), snap["seq"]
+            self.fired = list(snap.get("fired", []))
+            self.matches = {int(k): v for k, v in snap.get("matches", {}).items()}
+
+    # -- world events ------------------------------------------------------------------------
+
+    def _fire(self, n: int, source: str) -> None:
+        ev = self.env.events[n]
+        self.fired.append(n)
+        self.instances[ev["server"]].apply_action(ev["action"], ev.get("params"), as_=ev.get("as"),
+                                                  source=f"{ev.get('name') or 'event ' + str(n + 1)} ({source})")
+
+    def _due_by_time(self) -> None:
+        for n, ev in enumerate(self.env.events):
+            if n in self.fired:
+                continue
+            if "at" in ev and _offset(ev["at"], self.start) <= self.clock.now:
+                self._fire(n, f"at {ev['at']}")
+            elif not any(t in ev for t in TRIGGERS):
+                self._fire(n, "start")
+            elif "after_calls" in ev and sum(len(i.calls) for i in self.instances.values()) >= int(ev["after_calls"]):
+                self._fire(n, f"after {ev['after_calls']} calls")
+
+    def _matching(self, key: str, server: str, tool: str, agent: str | None, record: dict[str, Any] | None) -> None:
+        for n, ev in enumerate(self.env.events):
+            m = ev.get(key)
+            if m is None or n in self.fired:
+                continue
+            if (m.get("server", server) != server or m.get("tool", tool) != tool
+                    or (m.get("agent") is not None and m["agent"] != agent)):
+                continue
+            if record is not None and m.get("ok") is not None and record.get("ok") != m["ok"]:
+                continue
+            self.matches[n] = self.matches.get(n, 0) + 1
+            if self.matches[n] == int(m.get("nth", 1)):
+                self._fire(n, f"{key} {server}.{tool}")
+
+    def before_call(self, inst: Instance, tool: str, args: dict[str, Any], agent: str | None) -> None:
+        self._due_by_time()
+        self._matching("before", self._server_of[id(inst)], tool, agent, None)
+
+    def after_call(self, inst: Instance, record: dict[str, Any]) -> None:
+        self._matching("after", self._server_of[id(inst)], record["tool"], record.get("agent"), record)
+        self._due_by_time()
+
+    def advance(self, seconds: float) -> None:
+        """Let time pass (e.g. an agent waiting); fires any timed events that become due."""
+        with self.lock:
+            self.clock.now += dt.timedelta(seconds=seconds)
+            self._due_by_time()
+
+    def inject(self, server: str, action_name: str, params: dict[str, Any] | None = None, as_: str | None = None) -> Any:
+        """Make something happen right now (for harnesses driving a live run)."""
+        if server not in self.instances:
+            raise ValueError(f"unknown server {server!r}")
+        return self.instances[server].apply_action(action_name, params, as_=as_, source="injected")
+
+    def timeline(self) -> list[dict[str, Any]]:
+        """Agent calls and world events together, in the order they happened."""
+        items = [{**c, "server": s, "kind": "call"} for s, i in self.instances.items() for c in i.calls]
+        items += [{**e, "server": s, "kind": "event"} for s, i in self.instances.items() for e in i.events]
+        return sorted(items, key=lambda x: x["global_seq"])
 
     def fork(self, run_id: str) -> EnvRun:
         clone = EnvRun(self.env, run_id)

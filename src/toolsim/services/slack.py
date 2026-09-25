@@ -26,7 +26,7 @@ import base64
 from typing import Annotated, Any
 
 from ..core.instance import Instance, Service
-from ..core.tools import ToolError, tool
+from ..core.tools import ToolError, action, tool
 
 MAX_TEXT = 40000
 EMOJI = {"thumbsup", "+1", "white_check_mark", "eyes", "tada", "heart", "rocket", "fire", "joy", "pray", "100", "raised_hands",
@@ -140,6 +140,10 @@ class Slack(Service):
                  "from_bot": m["user"] == state["bot_user"], "is_reply": bool(m.get("parent_user_id"))}
                 for cid, ch in state["channels"].items() for m in state["messages"].get(cid, [])]
         return {**state, "messages": msgs, "channels": {c["name"]: c for c in state["channels"].values()}}
+
+    def error_shape(self, status: int, message: str) -> Any:
+        return {"ok": False, "error": {404: "not_found", 500: "internal_error", 502: "fatal_error",
+                                       503: "service_unavailable", 504: "request_timeout"}.get(status, "fatal_error")}
 
     def fault_error(self, fault: Any) -> tuple[Any, int]:
         return {
@@ -346,3 +350,58 @@ def slack_get_user_profile(ctx: Instance, user_id: Annotated[str, "The ID of the
 
 Slack.tools = [slack_list_channels, slack_post_message, slack_reply_to_thread, slack_add_reaction,
                slack_get_channel_history, slack_get_thread_replies, slack_get_users, slack_get_user_profile]
+
+
+# -- world actions (triggered by environments, never by agents) --------------------------
+
+def _chan_by_name(state: dict[str, Any], name: str) -> dict[str, Any]:
+    ch = next((c for c in state["channels"].values() if c["name"] == name.lstrip("#") or c["id"] == name), None)
+    if ch is None:
+        raise _fail("channel_not_found")
+    return ch
+
+
+def _user_id(state: dict[str, Any], who: str) -> str:
+    q = who.lower().lstrip("@")
+    for u in state["users"].values():
+        if q in (u["id"].lower(), u["name"].lower(), (u["profile"].get("email") or "").lower()):
+            return u["id"]
+    raise _fail("user_not_found")
+
+
+@action("post_message")
+def act_post_message(ctx: Instance, channel: str, user: str, text: str, thread_of: str | None = None) -> str:
+    """A colleague posts (optionally replying in the thread whose parent contains ``thread_of``)."""
+    s = ctx.state
+    ch = _chan_by_name(s, channel)
+    msg = _msg(s, _user_id(s, user), text, _ts(ctx))
+    if thread_of:
+        parent = next((m for m in s["messages"][ch["id"]] if not m.get("parent_user_id") and thread_of.lower()
+                       in m["text"].lower()), None)
+        if parent is None:
+            raise _fail("thread_not_found")
+        _add_reply(s, ch["id"], parent, msg)
+    else:
+        s["messages"][ch["id"]].append(msg)
+    return msg["ts"]
+
+
+@action("set_member")
+def act_set_member(ctx: Instance, channel: str, user: str, member: bool = True) -> None:
+    """Someone joins or is removed from a channel (use user 'bot' for the agent's bot)."""
+    s = ctx.state
+    ch = _chan_by_name(s, channel)
+    uid = s["bot_user"] if user == "bot" else _user_id(s, user)
+    if member and uid not in ch["members"]:
+        ch["members"].append(uid)
+    if not member and uid in ch["members"]:
+        ch["members"].remove(uid)
+
+
+@action("archive_channel")
+def act_archive_channel(ctx: Instance, channel: str) -> None:
+    """A channel is archived; posting to it fails with is_archived."""
+    _chan_by_name(ctx.state, channel)["is_archived"] = True
+
+
+Slack.actions = [act_post_message, act_set_member, act_archive_channel]

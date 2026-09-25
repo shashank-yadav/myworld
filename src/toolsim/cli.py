@@ -56,6 +56,22 @@ def cmd_freeze(args: argparse.Namespace) -> None:
         sys.exit(1)
 
 
+def cmd_issues(args: argparse.Namespace) -> None:
+    import inspect
+    import re as _re
+
+    from .issues import ISSUES
+    from .services import SERVICES
+    for name, (fn, needs, summary) in sorted(ISSUES.items()):
+        params = sorted(set(_re.findall(r'p\["(\w+)"\]|p\.get\("(\w+)"', inspect.getsource(fn)) and
+                            [a or b for a, b in _re.findall(r'p\["(\w+)"\]|p\.get\("(\w+)"', inspect.getsource(fn))]))
+        print(f"{name:22} {summary}")
+        print(f"{'':22} needs: {', '.join(sorted(needs)) or 'any server'}; params: {', '.join(params) or '-'}")
+    print("\nWorld actions per service (for custom `events:`):")
+    for name, cls in SERVICES.items():
+        print(f"  {name:9} {', '.join(a.name for a in cls.actions)}")
+
+
 def cmd_stdio(args: argparse.Namespace) -> None:
     from .core.instance import Instance
     from .core.mcp import serve_stdio
@@ -118,6 +134,9 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--rng-seed", type=int, default=0)
     s.add_argument("--version", dest="tool_version", help="service version date (default: latest)")
     s.set_defaults(fn=cmd_stdio)
+
+    s = sub.add_parser("issues", help="list the issue library and world actions")
+    s.set_defaults(fn=cmd_issues)
 
     s = sub.add_parser("versions", help="list service versions and whether each still matches its frozen fingerprint")
     s.set_defaults(fn=cmd_versions)

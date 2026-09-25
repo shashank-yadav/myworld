@@ -86,14 +86,53 @@ faults:
 ```
 
 Kinds:
-- `timeout`: nothing happens.
-- `timeout_after_commit`: the action happens, then the caller sees a timeout. This is how duplicates get created.
-- `server_error`
-- `rate_limit`
-- `error`: a custom payload.
-- `latency`
+- **Timeouts:** `timeout` (nothing happened) and `timeout_after_commit` (it happened, then timed out; this is how duplicates get created).
+- **HTTP-style errors, in each service's own error format:** `not_found` (404), `server_error` (500, or `status: 502/503/504`), `bad_gateway`, `unavailable`, `rate_limit` (429 with retry-after), and `error` (a custom payload).
+- **Slow calls:** `latency`, with `hang_s` (real seconds, to test client timeouts) and `delay_s` (virtual time passes, so world events can fire meanwhile).
+- **Transport and proxy failures:** `transport_error` (an HTML 502/503 page instead of an MCP reply), `truncated` (the response is cut off mid-JSON) and `duplicate_commit` (a retrying proxy performs the write twice).
 
-Faults are seeded and reproducible.
+A fault fires on the Nth matching call, with a seeded probability, or throughout a window
+(`from_call`/`until_call`, or `start`/`end` in virtual time) for an outage. Faults are reproducible.
+
+## Issues: realistic trouble, one line each
+
+```yaml
+issues:
+  - use: prompt_injection_email                  # an email with instructions aimed at the AI
+  - use: slot_taken                              # the attendee books the slot right after the agent checks
+    params: {attendee: john@acme.com, start: "2026-09-22T10:00:00-07:00", end: "2026-09-22T11:00:00-07:00"}
+  - use: search_lag                              # sent mail isn't searchable for a while: tempts a resend
+    params: {seconds: 600, recipient: john@acme.com}
+  - use: outage                                  # 503s for a window of calls or time, then recovery
+    params: {server: gmail, tool: send_email, from_call: 1, until_call: 2}
+```
+
+Each issue expands into world events, faults and `[issue: …]` checks, so a report shows which problems
+the agent handled. `toolsim issues` lists all 18:
+- **Data and security:** prompt injection, lookalike sender, similar names.
+- **Races and the world changing:** the slot gets taken, CI flips before merge, the base branch moves,
+  access is revoked, a document goes stale, the requester changes their mind.
+- **Consistency:** search index lag.
+- **Reliability:** flaky APIs (429/500/502/503), slow services, outages, 404 blips, truncated
+  responses, duplicate delivery, ambiguous timeouts.
+
+## World events
+
+The world changes while agents work. Events run a service's *world action* (mail arriving, a
+colleague booking time, CI finishing, access being revoked) on a trigger:
+
+```yaml
+events:
+  - {server: gmail, action: deliver_email, at: "+10m", params: {to: alex@acme.com, sender: …, subject: …, body: …}}
+  - {server: calendar, action: add_event, after: {tool: get-freebusy, agent: alex}, params: {…}}
+  - {server: github, action: set_status, before: {tool: merge_pull_request}, params: {…}}
+  - {server: drive, action: revoke_access, after_calls: 5, params: {…}}
+```
+
+Events without a trigger are part of the starting world. Events are deterministic, and snapshots
+and forks include which ones have fired. A harness can also inject events into a live run
+(`POST /envs/{id}/events`) and let virtual time pass (`POST /envs/{id}/advance`).
+`GET /envs/{id}/timeline` shows agent calls and world events together.
 
 ## Checks
 

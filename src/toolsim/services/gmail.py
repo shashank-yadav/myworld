@@ -24,7 +24,7 @@ from email.utils import format_datetime, parseaddr
 from typing import Annotated, Any, Literal
 
 from ..core.instance import Instance, Service
-from ..core.tools import ToolError, tool
+from ..core.tools import ToolError, action, tool
 
 SYSTEM_LABELS = ["INBOX", "SENT", "DRAFT", "SPAM", "TRASH", "UNREAD", "STARRED", "IMPORTANT",
                  "CATEGORY_PERSONAL", "CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS", "CATEGORY_UPDATES", "CATEGORY_FORUMS"]
@@ -127,6 +127,11 @@ class Gmail(Service):
         if isinstance(value, dict) and isinstance(value.get("error"), dict):
             return f"Error: {value['error'].get('message')}"
         return super().render(value)
+
+    def error_shape(self, status: int, message: str) -> Any:
+        codes = {404: "NOT_FOUND", 429: "RESOURCE_EXHAUSTED", 500: "INTERNAL", 502: "UNAVAILABLE", 503: "UNAVAILABLE",
+                 504: "DEADLINE_EXCEEDED"}
+        return {"error": {"code": status, "message": message, "status": codes.get(status, "UNKNOWN")}}
 
     def fault_error(self, fault: Any) -> tuple[Any, int]:
         if fault.kind == "rate_limit":
@@ -424,7 +429,11 @@ def search_emails(ctx: Instance,
                   maxResults: Annotated[int | None, "Maximum number of results to return"] = None) -> str:
     """Searches for emails using Gmail search syntax"""
     s = _mb(ctx)
-    hits = [m for m in s["messages"].values() if _matches(s, m, query, ctx.now())]
+    lag = s.get("_index_lag", 0)
+    cutoff = int((ctx.now().timestamp() - lag) * 1000) if lag else None
+    since = s.get("_index_lag_since", 0)
+    hits = [m for m in s["messages"].values() if _matches(s, m, query, ctx.now())
+            and (cutoff is None or int(m["internalDate"]) <= since or int(m["internalDate"]) <= cutoff)]
     hits.sort(key=lambda m: int(m["internalDate"]), reverse=True)
     hits = hits[: maxResults or 10]
     return "\n".join(f"ID: {m['id']}\nSubject: {m['subject']}\nFrom: {m['from']}\nDate: {m['date']}\n" for m in hits)
@@ -644,3 +653,42 @@ def create_filter_from_template(ctx: Instance,
 Gmail.tools = [send_email, draft_email, read_email, download_attachment, search_emails, modify_email, delete_email,
                list_email_labels, batch_modify_emails, batch_delete_emails, create_label, update_label, delete_label,
                get_or_create_label, create_filter, list_filters, get_filter, delete_filter, create_filter_from_template]
+
+
+# -- world actions (triggered by environments, never by agents) --------------------------
+
+def _box(ctx: Instance, email: str) -> dict[str, Any]:
+    box = ctx.state["mailboxes"].get(_addr(email))
+    if box is None:
+        raise ToolError({"error": {"code": 404, "message": f"no mailbox {email}"}})
+    return box
+
+
+@action("deliver_email")
+def act_deliver_email(ctx: Instance, to: str, sender: str, subject: str, body: str, cc: list[str] | None = None,
+                      attachments: list[dict] | None = None, thread_subject: str | None = None) -> str:
+    """An email arrives from outside (or from a colleague without an agent). Filters apply.
+    ``thread_subject`` threads it with an existing conversation."""
+    box = _box(ctx, to)
+    thread = None
+    if thread_subject:
+        norm = thread_subject.lower().removeprefix("re: ")
+        thread = next((m["threadId"] for m in sorted(box["messages"].values(), key=lambda m: int(m["internalDate"]))
+                       if m["subject"].lower().removeprefix("re: ") == norm), None)
+    m = _store(ctx, box, sender=sender, to=[to], cc=cc or [], bcc=[], subject=subject, body=body,
+               labels=["INBOX", "UNREAD"], date=ctx.now(), thread_id=thread, attachments=attachments or [])
+    _apply_filters(box, m, ctx)
+    return m["id"]
+
+
+@action("set_search_lag")
+def act_set_search_lag(ctx: Instance, seconds: int, mailbox: str | None = None) -> None:
+    """Eventual consistency: new messages take ``seconds`` to become searchable (real Gmail lags too).
+    An agent that "verifies" a send by searching may see nothing and send again."""
+    for email in [mailbox] if mailbox else list(ctx.state["mailboxes"]):
+        box = _box(ctx, email)
+        box["_index_lag"] = int(seconds)
+        box["_index_lag_since"] = int(ctx.now().timestamp() * 1000)  # mail already there stays searchable
+
+
+Gmail.actions = [act_deliver_email, act_set_search_lag]

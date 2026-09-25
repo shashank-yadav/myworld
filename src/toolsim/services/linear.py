@@ -27,7 +27,7 @@ import uuid
 from typing import Annotated, Any, Literal
 
 from ..core.instance import Instance, Service
-from ..core.tools import ToolError, tool
+from ..core.tools import ToolError, action, tool
 
 PRIORITY_NAMES = {0: "No priority", 1: "Urgent", 2: "High", 3: "Medium", 4: "Low"}
 DEFAULT_STATES = [("Backlog", "backlog", "#bec2c8"), ("Todo", "unstarted", "#e2e2e2"), ("In Progress", "started", "#f2c94c"),
@@ -149,6 +149,9 @@ class Linear(Service):
             return _find_user(state, identity)["id"]
         except ToolError:
             raise ValueError(f"no Linear user {identity} in this workspace") from None
+
+    def error_shape(self, status: int, message: str) -> Any:
+        return {"error": message, "type": {404: "NotFound", 503: "ServiceUnavailable"}.get(status, "InternalError")}
 
     def fault_error(self, fault: Any) -> tuple[Any, int]:
         if fault.kind == "rate_limit":
@@ -700,3 +703,26 @@ Linear.tools = [list_comments, create_comment, list_cycles, get_document, list_d
                 create_issue, update_issue, list_issue_statuses, get_issue_status, list_issue_labels, create_issue_label,
                 list_projects, get_project, create_project, update_project, list_project_labels, list_teams, get_team,
                 list_users, get_user, search_documentation]
+
+
+# -- world actions (triggered by environments, never by agents) --------------------------
+
+@action("set_state")
+def act_set_state(ctx: Instance, issue: str, state: str) -> None:
+    """Someone moves an issue to another workflow state."""
+    s = ctx.state
+    i = _find_issue(s, issue)
+    st = _find_state(s, i["teamId"], state)
+    i["stateId"] = st["id"]
+    _set_state_times(ctx, i, st)
+    i["updatedAt"] = _iso(ctx)
+
+
+@action("add_comment")
+def act_add_comment(ctx: Instance, issue: str, author: str, body: str) -> None:
+    """A colleague comments on an issue."""
+    s = ctx.state
+    _comment(ctx, s, _find_issue(s, issue)["id"], body, _find_user(s, author)["id"])
+
+
+Linear.actions = [act_set_state, act_add_comment]

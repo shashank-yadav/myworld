@@ -24,7 +24,7 @@ import re
 from typing import Annotated, Any, Literal
 
 from ..core.instance import Instance, Service
-from ..core.tools import ToolError, tool
+from ..core.tools import ToolError, action, tool
 
 FOLDER = "application/vnd.google-apps.folder"
 TYPES = {"doc": "application/vnd.google-apps.document", "sheet": "application/vnd.google-apps.spreadsheet",
@@ -133,6 +133,10 @@ class Drive(Service):
         if email not in state.get("roots", {}) and email != state["me"]:
             raise ValueError(f"no Drive user {identity} in this environment")
         return email
+
+    def error_shape(self, status: int, message: str) -> Any:
+        reason = {404: "notFound", 500: "backendError", 502: "backendError", 503: "backendError"}.get(status, "error")
+        return {"error": {"code": status, "message": message, "errors": [{"reason": reason, "message": message}]}}
 
     def fault_error(self, fault: Any) -> tuple[Any, int]:
         if fault.kind == "rate_limit":
@@ -581,3 +585,44 @@ def set_drive_file_permissions(ctx: Instance,
 Drive.tools = [search_drive_files, get_drive_file_content, get_drive_file_download_url, create_drive_file,
                create_drive_folder, import_to_google_doc, list_drive_items, copy_drive_file, update_drive_file,
                get_drive_shareable_link, manage_drive_access, set_drive_file_permissions]
+
+
+# -- world actions (triggered by environments, never by agents) --------------------------
+
+def _named(state: dict[str, Any], file: str) -> dict[str, Any]:
+    f = state["files"].get(file) or next((x for x in state["files"].values() if x["name"] == file), None)
+    if f is None:
+        raise _not_found(file)
+    return f
+
+
+@action("revoke_access")
+def act_revoke_access(ctx: Instance, file: str, email: str) -> None:
+    """The owner removes someone's access (mid-task, the agent starts getting 404s)."""
+    f = _named(ctx.state, file)
+    f["permissions"] = [p for p in f["permissions"] if p.get("emailAddress", "").lower() != email.lower()
+                        or p["role"] == "owner"]
+
+
+@action("share")
+def act_share(ctx: Instance, file: str, email: str, role: str = "reader") -> None:
+    """Someone shares a file with a person."""
+    if role not in ROLES:
+        raise _err(400, f"invalid role {role}", "invalid")
+    _grant(ctx, ctx.state, _named(ctx.state, file), "user", role, email.lower())
+
+
+@action("edit_content")
+def act_edit_content(ctx: Instance, file: str, content: str) -> None:
+    """A collaborator edits a file (what the agent read earlier is now stale)."""
+    f = _named(ctx.state, file)
+    f["content"], f["size"], f["modifiedTime"] = content, len(content.encode()), _iso(ctx)
+
+
+@action("trash")
+def act_trash(ctx: Instance, file: str) -> None:
+    """The owner moves a file to trash."""
+    _named(ctx.state, file)["trashed"] = True
+
+
+Drive.actions = [act_revoke_access, act_share, act_edit_content, act_trash]

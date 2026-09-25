@@ -22,7 +22,7 @@ from typing import Annotated, Any, Literal
 from zoneinfo import ZoneInfo
 
 from ..core.instance import Instance, Service
-from ..core.tools import ToolError, tool
+from ..core.tools import ToolError, action, tool
 
 COLORS = {str(i): c for i, c in enumerate(
     ["#a4bdfc", "#7ae7bf", "#dbadff", "#ff887c", "#fbd75b", "#ffb878", "#46d6db", "#e1e1e1", "#5484ed", "#51b749",
@@ -114,11 +114,36 @@ class Calendar(Service):
     def default_actor(self, state: dict[str, Any]) -> str:
         return state["default"]
 
+    def grading_view(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Events annotated with ``booked_by_agent`` and ``conflicts_for``: the people for whom the
+        event overlaps something else they're busy with (accepted events or free/busy blocks)."""
+        tz = state["timeZone"]
+        live = [e for e in state["events"].values() if e["status"] != "cancelled"]
+
+        def busy_for(person: str, exclude: str) -> list[tuple[dt.datetime, dt.datetime]]:
+            spans = [(_parse(e["start"], tz), _parse(e["end"], tz)) for e in live if e["id"] != exclude
+                     and e.get("transparency") != "transparent" and _on_calendar(e, person)
+                     and not any(a["email"] == person and a["responseStatus"] == "declined" for a in e.get("attendees", []))]
+            return spans + [(_parse(b["start"], tz), _parse(b["end"], tz)) for b in state["busy"].get(person, [])]
+
+        events = []
+        for e in state["events"].values():
+            s, en = _parse(e["start"], tz), _parse(e["end"], tz)
+            people = {e["calendarId"], *[a["email"] for a in e.get("attendees", [])]}
+            conflicts = sorted(p for p in people if e["status"] != "cancelled"
+                               and any(a < en and s < b for a, b in busy_for(p, e["id"])))
+            events.append({**e, "booked_by_agent": bool(e.get("_by_agent")), "conflicts_for": conflicts})
+        return {**state, "events": events}
+
     def resolve_actor(self, state: dict[str, Any], identity: str) -> str:
         email = identity.strip().lower()
         if email not in state["people"]:
             raise ValueError(f"no calendar user {identity} in this environment")
         return email
+
+    def error_shape(self, status: int, message: str) -> Any:
+        reasons = {404: "notFound", 500: "backendError", 502: "backendError", 503: "backendError", 504: "backendError"}
+        return {"error": {"code": status, "message": message, "errors": [{"reason": reasons.get(status, "error")}]}}
 
     def fault_error(self, fault: Any) -> tuple[Any, int]:
         if fault.kind == "rate_limit":
@@ -229,7 +254,7 @@ def _calendar_ids(v: Any) -> list[str]:
 def _view(ctx: Instance, ev: dict[str, Any]) -> dict[str, Any]:
     """The event as the acting user sees it (``self`` flags are relative to them)."""
     me = ctx.actor
-    out = {k: v for k, v in ev.items() if k not in ("calendarId", "hiddenFor")}
+    out = {k: v for k, v in ev.items() if k not in ("calendarId", "hiddenFor") and not k.startswith("_")}
     out["creator"] = {**ev["creator"], "self": ev["creator"]["email"] == me}
     out["organizer"] = {**ev["organizer"], "self": ev["organizer"]["email"] == me}
     if ev.get("attendees"):
@@ -322,6 +347,7 @@ def create_event(ctx: Instance,
         "summary": summary, "start": start, "end": end, "description": description, "timeZone": timeZone,
         "location": location, "colorId": colorId, "recurrence": recurrence,
         "attendees": [a.get("email") if isinstance(a, dict) else a for a in attendees or []]}, actor=ctx.actor)
+    ev["_by_agent"] = True  # graders can tell agent-made events from the world's (never shown to agents)
     if sendUpdates != "none" and ev.get("attendees"):
         ev["invitationsSent"] = [a["email"] for a in ev["attendees"] if a["email"] != ctx.actor]
     return {"event": _view(ctx, ev)}
@@ -461,3 +487,52 @@ def list_colors(ctx: Instance) -> dict[str, Any]:
 
 Calendar.tools = [list_calendars, list_events, get_event, search_events, create_event, update_event, delete_event,
                   respond_to_event, get_freebusy, get_current_time, list_colors]
+
+
+# -- world actions (triggered by environments, never by agents) --------------------------
+
+def _find_event(ctx: Instance, summary: str) -> dict[str, Any]:
+    ev = next((e for e in ctx.state["events"].values() if e["status"] != "cancelled"
+               and summary.lower() in e.get("summary", "").lower()), None)
+    if ev is None:
+        raise _err(404, f"no event matching {summary!r}")
+    return ev
+
+
+@action("add_event")
+def act_add_event(ctx: Instance, calendar: str, summary: str, start: str, end: str,
+                  attendees: list[str] | None = None) -> str:
+    """Someone books time on their calendar (e.g. the slot the agent just checked)."""
+    cid = calendar.lower()
+    if cid not in ctx.state["calendars"]:
+        raise _err(404, f"no calendar {calendar}")
+    return _new_event(ctx, ctx.state, cid, {"summary": summary, "start": start, "end": end,
+                                            "attendees": attendees or []}, actor=cid)["id"]
+
+
+@action("add_busy")
+def act_add_busy(ctx: Instance, calendar: str, start: str, end: str) -> None:
+    """A calendar becomes busy (for people known only through free/busy)."""
+    ctx.state["busy"].setdefault(calendar.lower(), []).append({"start": start, "end": end})
+
+
+@action("respond")
+def act_respond(ctx: Instance, summary: str, attendee: str, response: str) -> None:
+    """A person without an agent answers an invite."""
+    ev = _find_event(ctx, summary)
+    a = next((a for a in ev.get("attendees", []) if a["email"] == attendee.lower()), None)
+    if a is None:
+        raise _err(400, f"{attendee} is not invited to {summary!r}")
+    a["responseStatus"] = response
+    ev["updated"] = ctx.now().isoformat()
+
+
+@action("cancel_event")
+def act_cancel_event(ctx: Instance, summary: str) -> None:
+    """The organizer cancels an event."""
+    ev = _find_event(ctx, summary)
+    ev["status"] = "cancelled"
+    ev["updated"] = ctx.now().isoformat()
+
+
+Calendar.actions = [act_add_event, act_add_busy, act_respond, act_cancel_event]

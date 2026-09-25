@@ -32,7 +32,7 @@ import uuid
 from typing import Annotated, Any, Literal
 
 from ..core.instance import Instance, Service
-from ..core.tools import ToolError, tool
+from ..core.tools import ToolError, action, tool
 
 PROPERTY_TYPES = {"title", "text", "number", "select", "multi_select", "status", "date", "people", "checkbox", "url",
                   "email", "phone"}
@@ -143,6 +143,11 @@ class Notion(Service):
             if q in (u["id"], u["email"].lower(), u["name"].lower()):
                 return u["id"]
         raise ValueError(f"no Notion user {identity} in this workspace")
+
+    def error_shape(self, status: int, message: str) -> Any:
+        code = {404: "object_not_found", 500: "internal_server_error", 502: "internal_server_error",
+                503: "service_unavailable", 504: "gateway_timeout"}.get(status, "internal_server_error")
+        return {"object": "error", "status": status, "code": code, "message": message}
 
     def fault_error(self, fault: Any) -> tuple[Any, int]:
         if fault.kind == "rate_limit":
@@ -616,3 +621,28 @@ def notion_get_teams(ctx: Instance, query: Annotated[str | None, "Filter teamspa
 Notion.tools = [notion_search, notion_fetch, notion_create_pages, notion_update_page, notion_move_pages,
                 notion_duplicate_page, notion_create_database, notion_query_data_sources, notion_create_comment,
                 notion_get_comments, notion_get_users, notion_get_teams]
+
+
+# -- world actions (triggered by environments, never by agents) --------------------------
+
+def _titled(state: dict[str, Any], title: str) -> dict[str, Any]:
+    p = next((p for p in state["pages"].values() if p["title"] == title), None)
+    if p is None:
+        raise _not_found(f"page titled {title!r}")
+    return p
+
+
+@action("edit_page")
+def act_edit_page(ctx: Instance, title: str, content: str) -> None:
+    """A teammate rewrites a page (what the agent read earlier is now stale)."""
+    p = _titled(ctx.state, title)
+    p["content"], p["last_edited_time"] = content, _iso(ctx)
+
+
+@action("restrict_page")
+def act_restrict_page(ctx: Instance, title: str, restricted: bool = True) -> None:
+    """A page's permissions change: it disappears for everyone without access."""
+    _titled(ctx.state, title)["restricted"] = restricted
+
+
+Notion.actions = [act_edit_page, act_restrict_page]
