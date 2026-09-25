@@ -172,6 +172,19 @@ def _ref_json(r: dict[str, Any], name: str) -> dict[str, Any]:
             "object": {"sha": sha, "type": "commit", "url": f"{API}/repos/{r['full_name']}/git/commits/{sha}"}}
 
 
+@op("github.repos.getReadme", "GET", "/repos/{owner}/{repo}/readme", read_only=True)
+def readme(ctx: Instance, req: Request) -> Any:
+    r = _r(ctx, req)
+    ref = req.arg("ref") or r["default_branch"]
+    from .model import _ref_sha
+    tree = r["commits"][_ref_sha(r, ref)]["tree"]
+    path = next((p for p in tree if p.lower() in ("readme.md", "readme", "readme.rst", "readme.txt")), None)
+    if path is None:
+        raise _err(404, "Not Found")
+    return files_tools.get_file_contents.fn(ctx, owner=req.params["owner"], repo=req.params["repo"], path=path,
+                                            branch=ref)
+
+
 @op("github.git.getRef", "GET", "/repos/{owner}/{repo}/git/ref/{ref+}", read_only=True)
 def get_ref(ctx: Instance, req: Request) -> Any:
     r = _r(ctx, req)
@@ -769,9 +782,15 @@ def artifacts(ctx: Instance, req: Request) -> Any:
 
 # -- search, rate limit -------------------------------------------------------------------------------
 
+def _ungroup(q: str) -> str:
+    """GitHub search groups with parentheses (``gh`` sends ``( words ) repo:x``); drop the grouping."""
+    import re
+    return re.sub(r"\s+", " ", re.sub(r"(?<![\w:])[()]|[()](?!\w)", " ", q)).strip()
+
+
 @op("github.search.issuesAndPullRequests", "GET", "/search/issues", read_only=True)
 def search_issues(ctx: Instance, req: Request) -> Any:
-    return search_tools.search_issues.fn(ctx, q=req.arg("q") or "", sort=req.arg("sort"), order=req.arg("order"),
+    return search_tools.search_issues.fn(ctx, q=_ungroup(req.arg("q") or ""), sort=req.arg("sort"), order=req.arg("order"),
                                          per_page=req.int_arg("per_page", 30), page=req.int_arg("page", 1))
 
 

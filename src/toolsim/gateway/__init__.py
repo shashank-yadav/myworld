@@ -46,10 +46,11 @@ def intercepts(host: str) -> bool:
 
 class Gateway:
     def __init__(self, host: Any, *, bind: str = "127.0.0.1", port: int = 0, ca_dir: str | Path | None = None,
-                 passthrough: bool = True):
+                 passthrough: bool = True, tls_port: int | None = None):
         self.host = host
         self.bind = bind
         self.port = port
+        self.tls_port = tls_port  # direct TLS: for clients that ignore proxies (the API hosts resolve to us)
         self.passthrough = passthrough
         self.ca = CA(Path(ca_dir or os.environ.get("TOOLSIM_CA_DIR") or Path.home() / ".toolsim" / "ca"))
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -67,6 +68,10 @@ class Gateway:
             self._server = self._loop.run_until_complete(asyncio.start_server(self._client, self.bind, self.port,
                                                                               limit=MAX_BODY))
             self.port = self._server.sockets[0].getsockname()[1]
+            if self.tls_port is not None:
+                self._tls_server = self._loop.run_until_complete(asyncio.start_server(
+                    self._direct, self.bind, self.tls_port, ssl=self._sni_context(), limit=MAX_BODY))
+                self.tls_port = self._tls_server.sockets[0].getsockname()[1]
             ready.set()
             self._loop.run_forever()
 
@@ -82,6 +87,8 @@ class Gateway:
         if loop and server:
             def shutdown() -> None:
                 server.close()
+                if getattr(self, "_tls_server", None):
+                    self._tls_server.close()
                 for task in asyncio.all_tasks(loop):
                     task.cancel()
                 loop.call_later(0.05, loop.stop)
@@ -93,6 +100,13 @@ class Gateway:
     def url(self) -> str:
         return f"http://{self.bind}:{self.port}"
 
+    def hosts_file(self, ip: str = "127.0.0.1") -> str:
+        """/etc/hosts lines for direct-TLS mode (serve on port 443, or forward 443 to ``tls_port``)."""
+        names = ["gmail.googleapis.com", "www.googleapis.com", "oauth2.googleapis.com", "sheets.googleapis.com",
+                 "docs.googleapis.com", "people.googleapis.com", "drive.googleapis.com", "calendar-json.googleapis.com",
+                 "openidconnect.googleapis.com", "api.github.com", "uploads.github.com"]
+        return "".join(f"{ip} {n}\n" for n in names)
+
     def client_env(self) -> dict[str, str]:
         """Environment variables that route an agent's clients through the gateway."""
         ca = str(self.ca.cert_path)
@@ -102,6 +116,38 @@ class Gateway:
                 "HTTPLIB2_CA_CERTS": ca, "GIT_SSL_CAINFO": ca}
 
     # -- connections -------------------------------------------------------------------------------
+
+    def _sni_context(self) -> Any:
+        import ssl
+        base = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+        base.set_alpn_protocols(["http/1.1"])
+        cert, key = self.ca._leaf("www.googleapis.com")
+        base.load_cert_chain(cert, key)
+
+        def pick(sslobj: Any, name: str | None, _ctx: Any) -> None:
+            if name:  # present the certificate for the host the client asked for
+                sslobj.context = self.ca.context_for(name)
+        base.sni_callback = pick
+        return base
+
+    async def _direct(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        """Direct TLS: requests for API hosts that resolve to the gateway (/etc/hosts, DNS)."""
+        try:
+            while True:
+                head = await _read_head(reader)
+                if head is None:
+                    return
+                method, target, headers = head
+                host = next((v for k, v in headers if k.lower() == "host"), "").split(":")[0]
+                if not await self._dispatch(reader, writer, host, method, target, headers):
+                    return
+        except (ConnectionError, asyncio.IncompleteReadError, asyncio.LimitOverrunError):
+            pass
+        except Exception:
+            log.exception("gateway connection failed")
+        finally:
+            with contextlib.suppress(Exception):
+                writer.close()
 
     async def _client(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:

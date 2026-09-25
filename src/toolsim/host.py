@@ -82,6 +82,7 @@ class HostConfig:
     gateway_port: int | None = None           # also run the HTTPS gateway (real Google/GitHub clients) on this port
     gateway_bind: str = "127.0.0.1"
     gateway_passthrough: bool = True          # tunnel other hosts to the internet (False: refuse them)
+    gateway_tls_port: int | None = None       # also serve TLS directly (API hosts resolved to the gateway)
     ca_dir: Path | None = None                # where the gateway's CA lives (default ~/.toolsim/ca)
 
 
@@ -104,7 +105,8 @@ class Host:
         if self.config.gateway_port is not None:
             from .gateway import Gateway
             self.gateway = Gateway(self, bind=self.config.gateway_bind, port=self.config.gateway_port,
-                                   ca_dir=self.config.ca_dir, passthrough=self.config.gateway_passthrough).start()
+                                   ca_dir=self.config.ca_dir, passthrough=self.config.gateway_passthrough,
+                                   tls_port=self.config.gateway_tls_port).start()
 
     def credentials(self, base_url: str, *, run: EnvRun | None = None, instance: Instance | None = None,
                     agent: str | None = None) -> dict[str, Any]:

@@ -179,3 +179,26 @@ def test_gmail_search_language(api):
     rid = alex("GET", "messages", params={"q": "from:john", "format": "raw"}).json()["messages"][0]["id"]
     mid = next(h["value"] for h in alex("GET", f"messages/{rid}").json()["payload"]["headers"] if h["name"] == "Message-ID")
     assert count(f"rfc822msgid:{mid}") == 1
+
+
+def test_direct_tls_for_clients_that_ignore_proxies(tmp_path):
+    host = Host(HostConfig(gateway_port=0, gateway_tls_port=0, ca_dir=tmp_path))
+    try:
+        from toolsim.env import Environment
+        run = host.start_env(Environment.from_dict(SPEC), "w")
+        tok = host.credentials("http://x", run=run, agent="alex")["google_access_token"]
+        ctx = ssl.create_default_context(cafile=str(host.gateway.ca.cert_path))
+        for name in ("gmail.googleapis.com", "api.github.com"):
+            raw = ctx.wrap_socket(__import__("socket").create_connection(("127.0.0.1", host.gateway.tls_port)),
+                                  server_hostname=name)
+            assert name in str(raw.getpeercert()["subjectAltName"]), "the certificate for the name asked (SNI)"
+            raw.close()
+        conn = http.client.HTTPSConnection("127.0.0.1", host.gateway.tls_port, context=ctx, timeout=10)
+        conn.sock = ctx.wrap_socket(__import__("socket").create_connection(("127.0.0.1", host.gateway.tls_port)),
+                                    server_hostname="gmail.googleapis.com")
+        conn.request("GET", "/gmail/v1/users/me/profile", headers={"Authorization": f"Bearer {tok}",
+                                                                    "Host": "gmail.googleapis.com"})
+        assert json.loads(conn.getresponse().read())["emailAddress"] == "alex@acme.com"
+        assert "api.github.com" in host.gateway.hosts_file()
+    finally:
+        host.gateway.stop()

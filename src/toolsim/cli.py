@@ -158,6 +158,7 @@ def cmd_serve(args: argparse.Namespace) -> None:
                         env_dirs=[Path(d) for d in (args.env_dir or [])], max_instances=args.max_instances,
                         max_hang_s=args.max_hang, speed=parse_time(args.time), gateway_port=args.gateway,
                         gateway_bind=args.gateway_bind, gateway_passthrough=not args.no_passthrough,
+                        gateway_tls_port=args.gateway_tls,
                         ca_dir=Path(args.ca_dir) if args.ca_dir else None)
     host = Host(config)
     if host.gateway is not None:
@@ -235,6 +236,8 @@ def main(argv: list[str] | None = None) -> None:
                    help="also run the HTTPS gateway: real clients (gog, gh, Google/GitHub SDKs) via HTTPS_PROXY")
     s.add_argument("--gateway-bind", default="127.0.0.1")
     s.add_argument("--no-passthrough", action="store_true", help="gateway refuses hosts it doesn't simulate")
+    s.add_argument("--gateway-tls", type=int, metavar="PORT",
+                   help="also serve TLS directly, for clients that ignore proxies (point the API hosts at it)")
     s.add_argument("--ca-dir", help="where the gateway keeps its CA (default ~/.toolsim/ca)")
     s.set_defaults(fn=cmd_serve)
 

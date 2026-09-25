@@ -337,7 +337,11 @@ gh pr checks 4 --repo acme/api
 - **Clock:** real clients read the machine's clock, so with the gateway a world starts at the
   wall-clock time (`now: wallclock`) and runs in real time. Seeded dates move by whole weeks, so
   weekdays and times of day stay right; the alternative is to set the sandbox's clock to the world's.
-- **Without a proxy:** `http://<host>/gw/<api host>/<path>` serves the same APIs directly.
+- **Clients that ignore proxies:** `--gateway-tls PORT` also serves TLS directly, choosing the
+  certificate by SNI; point the API hosts at it (`Gateway.hosts_file()` prints the `/etc/hosts` lines).
+- **Without TLS:** `http://<host>/gw/<api host>/<path>` serves the same APIs over plain HTTP.
+- **Regression tests with the real binaries:** `TOOLSIM_CLIENTS_BIN=<dir with gog, gh>
+  TOOLSIM_HERMES_API="<python> <google_api.py>" pytest tests/test_real_clients.py`.
 - **Known gaps:** `git push`/`git clone` (git's own protocol) isn't simulated; use the API
   (`gh api .../contents`). Python's httplib2 (Google's client) honors `HTTPS_PROXY` only with
   `pysocks` installed.

@@ -598,7 +598,14 @@ class GitHubGraph:
         def auto_merge(a: dict[str, Any]) -> dict[str, Any]:
             raise QueryError("Pull request Auto merge is not allowed for this repository", "UNPROCESSABLE")
 
-        return {"createIssue": create_issue, "closeIssue": set_state("closed", "issueId"),
+        def payload(name: str, fn: Any) -> Any:
+            def run(a: dict[str, Any]) -> dict[str, Any]:
+                out = fn(a)
+                return {"__typename": name[0].upper() + name[1:] + "Payload",
+                        "clientMutationId": (a.get("input") or {}).get("clientMutationId"), **out}
+            return run
+
+        return {k: payload(k, v) for k, v in {"createIssue": create_issue, "closeIssue": set_state("closed", "issueId"),
                 "reopenIssue": set_state("open", "issueId"), "addComment": add_comment, "updateIssue": update("id"),
                 "createPullRequest": create_pr, "updatePullRequest": update("pullRequestId"),
                 "closePullRequest": set_state("closed", "pullRequestId"),
@@ -606,7 +613,7 @@ class GitHubGraph:
                 "markPullRequestReadyForReview": ready(False), "convertPullRequestToDraft": ready(True),
                 "addLabelsToLabelable": labels(True), "removeLabelsFromLabelable": labels(False),
                 "requestReviews": request_reviews, "addPullRequestReview": add_review,
-                "replaceActorsForAssignable": replace_assignees, "enablePullRequestAutoMerge": auto_merge}
+                "replaceActorsForAssignable": replace_assignees, "enablePullRequestAutoMerge": auto_merge}.items()}
 
     def root(self) -> dict[str, Any]:
         s = self.s
