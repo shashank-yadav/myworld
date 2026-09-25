@@ -129,8 +129,62 @@ class Store:
     def names(self) -> list[str]:
         with self._lock:
             if self._db is not None:
-                return [r[0] for r in self._db.execute("SELECT name FROM names ORDER BY name")]
-            return sorted(k[5:] for k in self._mem if k.startswith("name:"))
+                found = [r[0] for r in self._db.execute("SELECT name FROM names ORDER BY name")]
+            else:
+                found = sorted(k[5:] for k in self._mem if k.startswith("name:"))
+            return [n for n in found if not n.startswith("__")]
+
+    def _children(self, text: str) -> list[str]:
+        out: list[str] = []
+
+        def walk(node: Any) -> None:
+            if is_ref(node):
+                out.append(node["$ref"])
+            elif isinstance(node, dict):
+                for v in node.values():
+                    walk(v)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v)
+        walk(json.loads(text))
+        return out
+
+    def gc(self, live: list[str] | None = None) -> dict[str, int]:
+        """Delete objects no saved name and no ``live`` reference (e.g. running checkpoints) reaches."""
+        with self._lock:
+            if self._db is not None:
+                roots = [r[0] for r in self._db.execute("SELECT ref FROM names") if r[0].startswith(PREFIX)]
+                every = [r[0] for r in self._db.execute("SELECT hash FROM objects")]
+            else:
+                roots = [v for k, v in self._mem.items() if k.startswith("name:") and v.startswith(PREFIX)]
+                every = [k for k in self._mem if k.startswith(PREFIX)]
+            seen: set[str] = set()
+            stack = [*roots, *(live or [])]
+            while stack:
+                h = stack.pop()
+                if h in seen:
+                    continue
+                seen.add(h)
+                try:
+                    stack.extend(self._children(self._read(h)))
+                except KeyError:
+                    continue
+            dead = [h for h in every if h not in seen]
+            if self._db is not None:
+                self._db.executemany("DELETE FROM objects WHERE hash = ?", [(h,) for h in dead])
+                if len(dead) > 1000:
+                    self._db.execute("VACUUM")
+            else:
+                for h in dead:
+                    self._mem.pop(h, None)
+            return {"deleted": len(dead), "kept": len(seen & set(every))}
+
+    def delete_name(self, name: str) -> None:
+        with self._lock:
+            if self._db is not None:
+                self._db.execute("DELETE FROM names WHERE name = ?", (name,))
+            else:
+                self._mem.pop("name:" + name, None)
 
     def stats(self) -> dict[str, int]:
         with self._lock:

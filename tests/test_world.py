@@ -296,3 +296,31 @@ def test_counterfactuals():
     first, second = out["reports"]
     assert not first["outcome_changed"]
     assert second["first_divergence"] == 0, "the recorded UPDATE now changes nothing"
+
+
+def test_store_garbage_collection(tmp_path):
+    c = TestClient(create_app(config=HostConfig(store=tmp_path / "s.db")))
+    c.post("/envs", json={"spec": SPEC, "id": "s"})
+    for i in range(3):
+        c.post("/envs/s/mutate", json={"component": "db", "op": "sql",
+                                       "params": {"statement": "INSERT INTO orders(customer, status) VALUES (?, 'new')",
+                                                  "params": [f"c{i}"]}})
+        c.post("/envs/s/checkpoint")
+    c.post("/envs/s/save", json={"name": "keep"})
+    c.post("/envs/s/save", json={"name": "drop"})
+    assert c.get("/store").json()["saved"] == ["drop", "keep"]
+    assert c.post("/store/gc").json()["deleted"] == 0, "everything is still reachable"
+    c.delete("/store/saved/drop")  # the same content as "keep": nothing to free
+    assert c.post("/store/gc").json()["deleted"] == 0
+    c.post("/envs", json={"spec": SPEC, "id": "t"})  # a run that is checkpointed but never saved
+    c.post("/envs/t/mutate", json={"component": "workspace", "op": "write",
+                                   "params": {"path": "scratch.txt", "content": "x" * 5000}})
+    c.post("/envs/t/checkpoint")
+    assert c.post("/store/gc").json()["deleted"] == 0, "a running run's checkpoints are live"
+    c.delete("/envs/t")
+    c.delete("/envs/s")
+    freed = c.post("/store/gc").json()
+    assert freed["deleted"] > 0 and freed["kept"] > 0
+    loaded = c.post("/envs/load", json={"name": "keep", "id": "k"})
+    assert loaded.status_code == 200 and c.get("/envs/k/journal").json()["steps"] == 3
+    assert c.post("/envs/k/branch", json={"step": 2, "id": "k2"}).status_code == 200

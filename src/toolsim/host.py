@@ -101,15 +101,37 @@ class Host:
         self.snapshots: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self.env_snapshots: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._lock = threading.RLock()
-        self.gateway_secret = self.config.token or secrets.token_hex(16)  # signs agents' API tokens
         from .world.store import Store
         self.store = Store(self.config.store) if self.config.store else None
+        self.gateway_secret = self._secret()  # signs agents' API tokens
         self.gateway: Any = None
         if self.config.gateway_port is not None:
             from .gateway import Gateway
             self.gateway = Gateway(self, bind=self.config.gateway_bind, port=self.config.gateway_port,
                                    ca_dir=self.config.ca_dir, passthrough=self.config.gateway_passthrough,
                                    tls_port=self.config.gateway_tls_port).start()
+
+    def _secret(self) -> str:
+        """The key that signs agents' tokens: the host token, or one kept with the store or the
+        gateway's CA, so credentials handed to agents survive a restart."""
+        if self.config.token:
+            return self.config.token
+        if self.store is not None:
+            try:
+                return self.store.lookup("__gateway_secret__")
+            except KeyError:
+                secret = secrets.token_hex(16)
+                self.store.name("__gateway_secret__", secret)
+                return secret
+        if self.config.gateway_port is not None:
+            ca = Path(self.config.ca_dir or Path.home() / ".toolsim" / "ca")
+            ca.mkdir(parents=True, exist_ok=True)
+            f = ca / "gateway-secret"
+            if not f.exists():
+                f.write_text(secrets.token_hex(16))
+                f.chmod(0o600)
+            return f.read_text().strip()
+        return secrets.token_hex(16)
 
     def credentials(self, base_url: str, *, run: EnvRun | None = None, instance: Instance | None = None,
                     agent: str | None = None) -> dict[str, Any]:
@@ -614,10 +636,34 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
             raise HTTPException(400, "no store: start the host with --store PATH")
         try:
             run = EnvRun.load(host.store, str(body.get("name") or ""), _valid_id(body.get("id"), "run id"))
+            if body.get("catch_up", run.clock.realtime):
+                run.catch_up()  # a real-time world moves on to now (what happened meanwhile happens)
             host._register(run)
         except (KeyError, ValueError) as e:
             raise bad_request(ValueError(f"nothing saved as {body.get('name')!r}") if isinstance(e, KeyError) else e) from None
         return describe_env(request, run)
+
+    @app.get("/store")
+    def store_info() -> dict[str, Any]:
+        if host.store is None:
+            raise HTTPException(400, "no store: start the host with --store PATH")
+        return {"saved": host.store.names(), **host.store.stats()}
+
+    @app.post("/store/gc")
+    def store_gc() -> dict[str, Any]:
+        """Free what nothing uses any more: saved runs and running runs' checkpoints are kept."""
+        if host.store is None:
+            raise HTTPException(400, "no store: start the host with --store PATH")
+        live = [cp["$ref"] for r in host.list_envs() for cp in r.world.checkpoints.values()
+                if isinstance(cp, dict) and "$ref" in cp]
+        return host.store.gc(live)
+
+    @app.delete("/store/saved/{name}")
+    def store_forget(name: str) -> dict[str, Any]:
+        if host.store is None:
+            raise HTTPException(400, "no store: start the host with --store PATH")
+        host.store.delete_name(name)
+        return {"forgotten": name}
 
     @app.get("/envs/{run_id}/components")
     def env_components(run_id: str) -> dict[str, Any]:

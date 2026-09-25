@@ -128,7 +128,20 @@ class Cluster:
                 runs[idlest].append(rid)
 
 
-def create_coordinator(cluster: Cluster, token: str | None = None) -> FastAPI:
+def _rewrite(value: Any, worker: str, base: str) -> Any:
+    """Point agents' URLs at the coordinator, so they keep working when their run moves."""
+    if isinstance(value, str):
+        return value.replace(worker + "/instances/", base + "/instances/")
+    if isinstance(value, list):
+        return [_rewrite(v, worker, base) for v in value]
+    if isinstance(value, dict):
+        return {k: _rewrite(v, worker, base) for k, v in value.items()}
+    return value
+
+
+def create_coordinator(cluster: Cluster, token: str | None = None, proxy_agents: bool = False) -> FastAPI:
+    """``proxy_agents``: hand agents the coordinator's URLs (their traffic passes through it, and
+    survives moves); otherwise agents talk to their worker directly (faster, but a move cuts them off)."""
     app = FastAPI(title="toolsim coordinator", version=__version__)
 
     @app.middleware("http")
@@ -167,7 +180,28 @@ def create_coordinator(cluster: Cluster, token: str | None = None) -> FastAPI:
         r = forward(worker, "POST", "/envs", request.url.query, await request.body(),
                     request.headers.get("content-type"))
         if r.status_code == 200:
-            cluster.place(json.loads(r.body)["id"], worker)
+            data = json.loads(r.body)
+            cluster.place(data["id"], worker)
+            if proxy_agents:
+                return JSONResponse(_rewrite(data, _worker_base(data, worker), str(request.base_url).rstrip("/")))
+        return r
+
+    def _worker_base(data: dict[str, Any], worker: str) -> str:
+        for cfg in (data.get("agents") or {}).values():
+            for server in (cfg.get("mcpServers") or {}).values():
+                return server["url"].split("/instances/")[0]
+        return worker
+
+    @app.api_route("/instances/{instance_id}/mcp", methods=["GET", "POST", "DELETE"])
+    async def agent_traffic(instance_id: str, request: Request) -> Response:
+        """MCP for agents of runs anywhere in the cluster (instance ids are ``<run>-<server>``)."""
+        run_id = next((r for r in sorted(cluster.placement, key=len, reverse=True)
+                       if instance_id.startswith(r + "-")), None)
+        if run_id is None:
+            raise HTTPException(404, f"no instance {instance_id}")
+        worker = cluster.locate(run_id)
+        r = forward(worker, request.method, f"/instances/{instance_id}/mcp", request.url.query,
+                    await request.body(), request.headers.get("content-type"))
         return r
 
     @app.post("/envs/import")

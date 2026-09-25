@@ -48,3 +48,22 @@ def test_rebalance_evens_the_load():
     assert sum(m["moved"] for m in moves) == 2
     assert sorted(len(cl.get("/envs").json()["envs"]) for cl in workers.values()) == [2, 3]
     assert all(v["ok"] for v in coord.get("/cluster").json()["workers"].values())
+
+
+def test_agents_keep_working_when_their_run_moves():
+    workers = {f"http://w{i}": TestClient(create_app(config=HostConfig())) for i in range(2)}
+    c = Cluster(list(workers), client=lambda url: workers[url])
+    coord = TestClient(create_coordinator(c, proxy_agents=True))
+    env = coord.post("/envs", json={"spec": SPEC, "id": "live"}).json()
+    url = env["agents"]["agent"]["mcpServers"]["gmail"]["url"]
+    assert url.startswith("http://testserver/instances/live-gmail/mcp"), "the coordinator's URL"
+    path = url.split("testserver")[1]
+    call = {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+            "params": {"name": "send_email", "arguments": {"to": ["john@acme.com"], "subject": "a", "body": "."}}}
+    assert "Email sent" in coord.post(path, json=call).json()["result"]["content"][0]["text"]
+    home = c.placement["live"]
+    other = next(w for w in workers if w != home)
+    assert coord.post("/envs/live/move", json={"to": other}).json()["moved"]
+    again = coord.post(path, json={**call, "id": 2}).json()
+    assert "Email sent" in again["result"]["content"][0]["text"], "the same URL, now on the other machine"
+    assert coord.get("/envs/live/journal").json()["steps"] == 2

@@ -682,11 +682,24 @@ class EnvRun:
         with self.lock:
             self._due_by_time()
 
+    def _happened(self) -> tuple[int, ...]:
+        return (*(len(i.events) for i in self.instances.values()), *(len(i.pending) for i in self.instances.values()),
+                len(self.fired))
+
     def _due_by_time(self) -> None:
         self.clock.sync()
         if self.clock.realtime and not self.world.replaying and self.clock.now != self._time_logged:
-            self.world.record({"kind": "time", "to": self.clock.now.isoformat()})  # replays need wall time too
+            # wall time passed: if that makes something happen, a replay needs to know when
+            before, n = self._happened(), len(self.world.journal)
+            self.world.record({"kind": "time", "to": self.clock.now.isoformat()})
             self._time_logged = self.clock.now
+            self._run_due()
+            if self._happened() == before and len(self.world.journal) == n + 1:
+                self.world.journal.pop()  # nothing happened: no need to remember the moment
+            return
+        self._run_due()
+
+    def _run_due(self) -> None:
         for inst in self.instances.values():
             inst.run_due()
         for n, ev in enumerate(self.events):
@@ -752,6 +765,14 @@ class EnvRun:
         if name in self.instances:
             return self.inject(name, op, params, as_=params.pop("as", None))
         return self.world.mutate(name, op, **params)
+
+    def catch_up(self) -> None:
+        """A real-time run that sat in storage: let the time that passed meanwhile pass here too."""
+        with self.lock:
+            gap = (dt.datetime.now(dt.timezone.utc) - self.clock.now).total_seconds()
+            if gap > 0:
+                self.advance(gap)
+            self.clock.reanchor()
 
     def submit(self, answer: str) -> None:
         with self.lock:

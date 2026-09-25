@@ -4,6 +4,12 @@ Service behavior is versioned separately by date (`toolsim versions`); this file
 
 ## Unreleased
 
+- **Working-condition fixes (found running real processes):** agents' credentials survive host
+  restarts (the signing key is kept with the store or the CA); a loaded real-time run catches up to
+  the wall clock; the journal records the passage of time only when something happened (2 entries
+  instead of 21 for two calls); `--proxy-agents` keeps agents connected when their run moves;
+  `POST /store/gc` and `DELETE /store/saved/{name}`; the coordinator's startup line is flushed.
+
 - **World runtime, continued:** a durable copy-on-write store (`--store`: checkpoints as shared
   Merkle references, save/load across restarts, export/import); counterfactuals (branch, change,
   replay the rest, compare outcomes); machine components (`command` templates, `docker` preset);

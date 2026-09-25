@@ -343,9 +343,13 @@ checks:
   content-addressed store where unchanged subtrees are shared, so a checkpoint per step is cheap.
   `/envs/{id}/save` and `/envs/load` keep runs across restarts; `/envs/{id}/export` and
   `/envs/import` move them between machines.
+  Saved runs survive restarts along with their agents' credentials; a real-time run that was stored
+  catches up to the wall clock when loaded. `POST /store/gc` frees what nothing references.
 - **Many machines:** `toolsim coordinator --worker URL --worker URL` places runs on the
-  least-loaded host, routes each run's requests to its host (agents talk to their host directly),
-  moves runs (`/envs/{id}/move`) and rebalances (`/cluster/rebalance`).
+  least-loaded host, routes each run's requests to its host, moves runs (`/envs/{id}/move`) and
+  rebalances (`/cluster/rebalance`). By default agents talk to their host directly; with
+  `--proxy-agents` they get the coordinator's URLs, which keep working when their run moves. Give
+  every worker the same `--token` so agents' API credentials are valid on any of them.
 
 Over HTTP: `/envs/{id}/journal`, `/checkpoint`, `/branch`, `/counterfactual`, `/replay`, `/diff`,
 `/mutate`, `/components`, `/export`, `/save`; `/envs/import`, `/envs/load`. Changes made outside the world's API (an agent editing files directly) can't be

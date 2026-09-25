@@ -220,8 +220,10 @@ def cmd_coordinator(args: argparse.Namespace) -> None:
     from .cluster import Cluster, create_coordinator
     token = args.token or os.environ.get("TOOLSIM_TOKEN")
     cluster = Cluster(args.worker, token=args.worker_token or token)
-    print(f"coordinating {len(cluster.workers)} workers: {', '.join(cluster.workers)}")
-    uvicorn.run(create_coordinator(cluster, token), host=args.host, port=args.port, log_level="warning")
+    print(f"coordinating {len(cluster.workers)} workers: {', '.join(cluster.workers)}"
+          + (" (agents routed through the coordinator)" if args.proxy_agents else ""), flush=True)
+    uvicorn.run(create_coordinator(cluster, token, proxy_agents=args.proxy_agents), host=args.host, port=args.port,
+                log_level="warning")
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -261,6 +263,8 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--port", type=int, default=8700)
     s.add_argument("--token", help="require this bearer token (or TOOLSIM_TOKEN)")
     s.add_argument("--worker-token", help="token for the workers (default: the same)")
+    s.add_argument("--proxy-agents", action="store_true",
+                   help="give agents the coordinator's URLs, so they keep working when their run moves")
     s.set_defaults(fn=cmd_coordinator)
     s = sub.add_parser("stdio", help="serve one instance over stdio")
     s.add_argument("service")
