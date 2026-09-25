@@ -159,20 +159,37 @@ def handle(host_obj: Any, target: str, method: str, path: str, query: str, heade
         return HttpResult(e.status, e.body.encode() if isinstance(e.body, str) else e.body,
                           {"content-type": "text/html; charset=UTF-8"})
     if result.is_error:
+        if not _is_google(target) and result.status == 200:  # GraphQL: errors travel in a 200 (writes rolled back)
+            return _json(200, result.data, _github_headers(inst))
         status = result.status if result.status >= 400 else 400
         if _is_google(target):
             return _json(status, g.body(result.data if result.data is not None else result.text, status, target))
-        data = result.data if isinstance(result.data, dict) else {"message": result.text}
-        return _json(status, data)
+        data = dict(result.data) if isinstance(result.data, dict) else {"message": result.text}
+        data.setdefault("documentation_url", "https://docs.github.com/rest")
+        data.setdefault("status", str(status))
+        return _json(status, data, _github_headers(inst))
     value = result.data
     pretty = q.get("prettyPrint", ["true"])[-1].lower() != "false"
+    extra = _github_headers(inst) if target in GITHUB_HOSTS else {}
     if isinstance(value, Response):
+        headers = {**extra, **value.headers}
         if value.body is None:
-            return HttpResult(value.status, b"", value.headers)
+            return HttpResult(value.status, b"", headers)
         if isinstance(value.body, (bytes, bytearray)):
-            return HttpResult(value.status, bytes(value.body), value.headers)
-        return _json(value.status, value.body, value.headers, pretty)
-    return _json(200, value, pretty=pretty)
+            return HttpResult(value.status, bytes(value.body), headers)
+        return _json(value.status, value.body, headers, pretty)
+    return _json(200, value, extra, pretty=pretty)
+
+
+def _github_headers(inst: Instance) -> dict[str, str]:
+    used = len(inst.calls)
+    reset = int(inst.clock.timestamp()) + 3600
+    return {"x-github-api-version-selected": "2022-11-28", "x-ratelimit-limit": "5000",
+            "x-ratelimit-remaining": str(max(0, 5000 - used)), "x-ratelimit-used": str(used),
+            "x-ratelimit-reset": str(reset), "x-ratelimit-resource": "core",
+            "x-oauth-scopes": "gist, read:org, repo, workflow", "x-accepted-oauth-scopes": "repo",
+            "x-github-media-type": "github.v3; format=json",
+            "x-github-request-id": hashlib.sha1(f"{used}".encode()).hexdigest()[:8].upper() + ":1A2B:3C4D"}
 
 
 def _multipart_related(ctype: str, body: bytes) -> Any:

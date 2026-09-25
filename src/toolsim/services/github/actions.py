@@ -7,7 +7,7 @@ from typing import Any
 from ...core.instance import Instance
 from ...core.tools import action
 from .issues import _issue
-from .model import _branch, _comment, _commit, _iso, _not_found, _pushed, _put_blob, _repo, _unprocessable, _user
+from .model import _branch, _comment, _commit, _finish_run, _iso, _not_found, _pushed, _put_blob, _repo, _unprocessable, _user
 
 
 def _repo_named(state: dict[str, Any], full_name: str) -> dict[str, Any]:
@@ -24,6 +24,8 @@ def act_set_status(ctx: Instance, repo: str, ref: str, context: str, state: str,
     sha = r["branches"].get(ref, ref)
     sts = [x for x in r["statuses"].get(sha, []) if x["context"] != context]
     r["statuses"][sha] = sts + [{"context": context, "state": state, "description": description}]
+    if sha in r["commits"] and ctx.state.get("_v1"):
+        _finish_run(ctx, r, sha, context, state, description)
 
 
 @action("push_commit")

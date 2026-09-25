@@ -24,6 +24,7 @@ toolsim = "toolsim.cli:main"
 [project.optional-dependencies]
 gateway = [
     "cryptography>=42",
+    "graphql-core>=3.2",
 ]
 
 [tool.uv.build-backend]

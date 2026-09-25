@@ -83,7 +83,8 @@ def operation(op_id: str, method: str, path: str, *, service: str | None = None,
     """Declare a REST operation. ``path`` uses ``{name}`` for a segment and ``{name+}`` for the rest."""
     def wrap(fn: Callable[..., Any]) -> Callable[..., Any]:
         svc = service or fn.__module__.split(".")[-2]
-        regex = re.sub(r"\{(\w+)\+\}", r"(?P<\1>.+)", re.escape(path).replace(r"\{", "{").replace(r"\}", "}"))
+        escaped = re.escape(path).replace(r"\{", "{").replace(r"\}", "}").replace(r"\+}", "+}")
+        regex = re.sub(r"\{(\w+)\+\}", r"(?P<\1>.+)", escaped)
         regex = re.sub(r"\{(\w+)\}", r"(?P<\1>[^/]+)", regex)
         def run(ctx: Any, args: dict[str, Any]) -> Any:
             body = args.get("body")

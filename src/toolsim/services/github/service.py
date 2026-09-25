@@ -6,7 +6,7 @@ from typing import Any
 
 from ...core.instance import Instance, Service
 from . import notify
-from .model import SEARCH_LAG, V1, V2, V3, _comment, _commit, _delay, _new_issue, _new_pull, _new_repo, _put_blob, _user
+from .model import SEARCH_LAG, V1, V2, V3, _comment, _finish_run, _commit, _delay, _new_issue, _new_pull, _new_repo, _put_blob, _user
 
 
 class GitHub(Service):
@@ -150,6 +150,9 @@ class GitHub(Service):
                 sha = repo["branches"].get(ref, ref)
                 repo["statuses"][sha] = [{"context": s["context"], "state": s["state"],
                                           "description": s.get("description", "")} for s in sts]
+                if ctx.at_least(V1) and sha in repo["commits"]:  # what already ran shows up as Actions runs
+                    for st in sts:
+                        _finish_run(ctx, repo, sha, st["context"], st["state"], st.get("description", ""))
             items = [("issue", i) for i in r.get("issues", [])] + [("pull", p) for p in r.get("pulls", [])]
             if any("number" in x for _, x in items):  # imported data: keep the real numbers
                 items.sort(key=lambda kx: kx[1].get("number", 0))

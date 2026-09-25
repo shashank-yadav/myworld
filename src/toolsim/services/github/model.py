@@ -50,23 +50,114 @@ def _check_push(state: dict[str, Any], r: dict[str, Any], branch: str) -> None:
         raise _err(409, "Repository rule violations found\n\nChanges must be made through a pull request.\n\n")
 
 
+def _ci_outcome(ctx: Instance, r: dict[str, Any], sha: str) -> str | None:
+    """Why CI fails on ``sha`` (a matching fail_if rule, or a flaky test), or None if it passes."""
+    ci = r["ci"]
+    tree = r["commits"][sha]["tree"]
+    blobs = ctx.state["blobs"]
+    reason = next((f"{p}: matched {rule.get('content~')!r}" for rule in ci["fail_if"] for p, b in sorted(tree.items())
+                   if p.startswith(rule.get("path", "")) and (rule.get("content~") or "") in blobs[b]), None)
+    return reason or (ci["flaky"] and ctx.rng.random() < ci["flaky"] and "flaky test: test_timeout_under_load") or None
+
+
 def _pushed(ctx: Instance, r: dict[str, Any], sha: str) -> None:
     """A commit landed on a branch: CI starts on it and reports back later (2026-09-25.1)."""
     ci = r.get("ci")
     if not ctx.state.get("_v1") or not ci:
         return
-    tree = r["commits"][sha]["tree"]
-    blobs = ctx.state["blobs"]
-    reason = next((f"{p}: matched {rule.get('content~')!r}" for rule in ci["fail_if"] for p, b in sorted(tree.items())
-                   if p.startswith(rule.get("path", "")) and (rule.get("content~") or "") in blobs[b]), None)
     for context in ci["contexts"]:
-        failed = reason or (ci["flaky"] and ctx.rng.random() < ci["flaky"] and "flaky test: test_timeout_under_load")
+        failed = _ci_outcome(ctx, r, sha)
         r["statuses"][sha] = [x for x in r["statuses"].get(sha, []) if x["context"] != context] + [
             {"context": context, "state": "pending", "description": "In progress"}]
+        _start_run(ctx, r, sha, context)
         ctx.schedule(ci["duration"], "set_status", {
             "repo": r["full_name"], "ref": sha, "context": context, "state": "failure" if failed else "success",
             "description": f"Failed: {failed}" if failed else "All checks have passed"},
             reason=f"{context} finishes on {sha[:7]}")
+
+
+# -- GitHub Actions: each CI context is a workflow run with one job --------------------------------
+
+WORKFLOW = {"id": 90210001, "name": "CI", "path": ".github/workflows/ci.yml", "state": "active"}
+STEPS = ["Set up job", "Run actions/checkout@v4", "Set up Python", "Install dependencies", "Run tests",
+         "Post Run actions/checkout@v4", "Complete job"]
+
+
+def _branch_of(r: dict[str, Any], sha: str) -> str | None:
+    return next((b for b, x in r["branches"].items() if x == sha), None)
+
+
+def _start_run(ctx: Instance, r: dict[str, Any], sha: str, context: str, attempt_of: dict[str, Any] | None = None
+               ) -> dict[str, Any]:
+    runs = r.setdefault("runs", {})
+    now = _iso(ctx)
+    if attempt_of is not None:
+        run = attempt_of
+        run.update(status="in_progress", conclusion=None, run_attempt=run["run_attempt"] + 1, updated_at=now,
+                   run_started_at=now)
+    else:
+        commit = r["commits"][sha]
+        run = {"id": ctx.next("run_id", 17880000000), "context": context, "workflow_id": WORKFLOW["id"],
+               "name": WORKFLOW["name"], "display_title": commit["message"].split("\n")[0], "head_sha": sha,
+               "head_branch": _branch_of(r, sha), "event": "push", "status": "in_progress", "conclusion": None,
+               "run_number": len(runs) + 1, "run_attempt": 1, "created_at": now, "updated_at": now,
+               "run_started_at": now, "actor": commit["author"].get("login") or ctx.state["viewer"]}
+        runs[run["id"]] = run
+    run["jobs"] = [{"id": ctx.next("job_id", 50110000000), "name": context, "status": "in_progress",
+                    "conclusion": None, "started_at": now, "completed_at": None, "log": ""}]
+    return run
+
+
+def _finish_run(ctx: Instance, r: dict[str, Any], sha: str, context: str, state: str, description: str) -> None:
+    runs = [x for x in r.get("runs", {}).values() if x["head_sha"] == sha and x["context"] == context]
+    if not runs:
+        if state == "pending":
+            return
+        run = _start_run(ctx, r, sha, context)
+    else:
+        run = max(runs, key=lambda x: x["id"])
+    if state == "pending":
+        return
+    conclusion = "success" if state == "success" else "failure"
+    now = _iso(ctx)
+    run.update(status="completed", conclusion=conclusion, updated_at=now)
+    for job in run["jobs"]:
+        job.update(status="completed", conclusion=conclusion, completed_at=now,
+                   log=_job_log(job["started_at"], now, context, conclusion, description))
+
+
+def _job_log(start: str, end: str, context: str, conclusion: str, description: str) -> str:
+    t0 = start.replace("Z", ".1234567Z")
+    t1 = end.replace("Z", ".7654321Z")
+    lines = [f"{t0} Current runner version: '2.328.0'", f"{t0} ##[group]Operating System", f"{t0} Ubuntu",
+             f"{t0} 24.04.3", f"{t0} LTS", f"{t0} ##[endgroup]", f"{t0} ##[group]Run actions/checkout@v4",
+             f"{t0} ##[endgroup]", f"{t0} ##[group]Run pytest -q", f"{t0} pytest -q", f"{t0} ##[endgroup]"]
+    if conclusion == "success":
+        lines += [f"{t1} {description or 'All checks have passed'}", f"{t1} Cleaning up orphan processes"]
+    else:
+        detail = description.removeprefix("Failed: ") or "tests failed"
+        path = detail.split(":")[0] if ":" in detail else "tests"
+        lines += [f"{t1} F", f"{t1} =================================== FAILURES ===================================",
+                  f"{t1} ______________________________ {path} ______________________________",
+                  f"{t1} E   {detail}", f"{t1} =========================== short test summary info ============================",
+                  f"{t1} FAILED {path} - {detail}", f"{t1} 1 failed in 3.21s",
+                  f"{t1} ##[error]Process completed with exit code 1."]
+    return "\n".join(lines) + "\n"
+
+
+def _rerun(ctx: Instance, r: dict[str, Any], run: dict[str, Any]) -> None:
+    ci = r.get("ci") or {"duration": 240, "contexts": [run["context"]], "fail_if": [], "flaky": 0}
+    r["ci"] = ci
+    failed = _ci_outcome(ctx, r, run["head_sha"])
+    _start_run(ctx, r, run["head_sha"], run["context"], attempt_of=run)
+    r["statuses"][run["head_sha"]] = [x for x in r["statuses"].get(run["head_sha"], [])
+                                      if x["context"] != run["context"]] + [
+        {"context": run["context"], "state": "pending", "description": "In progress"}]
+    ctx.schedule(ci["duration"], "set_status", {
+        "repo": r["full_name"], "ref": run["head_sha"], "context": run["context"],
+        "state": "failure" if failed else "success",
+        "description": f"Failed: {failed}" if failed else "All checks have passed"},
+        reason=f"re-run of {run['context']} on {run['head_sha'][:7]}")
 
 
 def _approvals(r: dict[str, Any], pr: dict[str, Any], head_sha: str) -> tuple[int, bool]:
