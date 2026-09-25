@@ -7,7 +7,8 @@ from typing import Any
 
 from ...core.instance import Instance, Service
 from ...core.tools import ToolError
-from .model import SEARCH_LAG, V1, V2, _comment, _new_issue, _resolve_user, _seed_board
+from . import notify
+from .model import SEARCH_LAG, V1, V2, V3, _comment, _new_issue, _resolve_user, _seed_board
 
 
 class Jira(Service):
@@ -18,7 +19,13 @@ class Jira(Service):
     versions = {"2026-09-25": "Initial release: 16 tools modeled on sooperset/mcp-atlassian (Jira).",
                 V1: "Agile boards and sprints (6 tools), sprint field and sprint functions in JQL.",
                 V2: "JQL search is eventually consistent: new and edited issues reach search about 10 seconds "
-                    "later (jira_get_issue is immediate)."}
+                    "later (jira_get_issue is immediate).",
+                V3: "Email notifications: assignments, status changes and comments email the assignee, reporter, "
+                    "watchers and earlier commenters (not whoever made the change), through any Gmail in the "
+                    "environment."}
+
+    def notifications(self, ctx: Instance, before: dict[str, Any], after: dict[str, Any], by: str | None) -> None:
+        notify.notifications(ctx, before, after, by)
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -60,6 +67,13 @@ class Jira(Service):
             ctx.advance(15)
             c("jira_search", {"jql": 'project = OPS AND summary ~ "pager storm"'})
             c("jira_search", {"jql": 'key = OPS-3 AND status = "In Progress"'})
+        if ctx.at_least(V3):
+            c("jira_assign_issue", {"issue_key": "OPS-4", "assignee": "john@acme.com"})
+            c("jira_add_comment", {"issue_key": "OPS-4", "body": "Can you take this one?"})
+            c("jira_add_comment", {"issue_key": "OPS-4", "body": "Sure, on it."}, as_="john@acme.com")
+            c("jira_transition_issue", {"issue_key": "OPS-4", "transition_id": "21"}, as_="john@acme.com")
+            c("jira_create_issue", {"project_key": "OPS", "summary": "Renew TLS certs", "issue_type": "Task",
+                                    "assignee": "priya@acme.com"})
 
     def default_seed(self) -> dict[str, Any]:
         return {
@@ -104,6 +118,8 @@ class Jira(Service):
             state.update(_v1=True, boards={}, sprints={})
         if ctx.at_least(V2):
             state["_search_lag"] = {**SEARCH_LAG, **(seed.get("search_lag") or {})}
+        if ctx.at_least(V3):
+            state["_notify"] = True
         for u in [me, *seed.get("users", [])]:
             state["users"][u["account_id"]] = {"account_id": u["account_id"], "display_name": u["display_name"],
                                                "email": u.get("email"), "active": u.get("active", True)}

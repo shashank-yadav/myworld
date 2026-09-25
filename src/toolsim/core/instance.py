@@ -88,6 +88,11 @@ class Service:
         """A fixed script of representative calls on the default world. Its results are frozen per
         version (see toolsim.versions), so any behavior change shows up as a changed fingerprint."""
 
+    def notifications(self, ctx: Instance, before: dict[str, Any], after: dict[str, Any], by: str | None) -> None:
+        """After a successful write, in versions that set ``state["_notify"]``: compare the states and
+        ``ctx.notify`` the people the change concerns (assignments, comments...). ``by`` is who made
+        it: the acting user for a call, None for a world action (someone else; the data may say who)."""
+
     def check_call(self, ctx: Instance, tool: str, args: dict[str, Any]) -> None:
         """Checks every call must pass before its tool runs (raise ToolError to refuse it)."""
 
@@ -349,11 +354,18 @@ class Instance:
         self._outbox.append({"to": to.lower(), "sender": sender, "subject": subject, "body": body,
                              "labels": labels or []})
 
-    def _flush(self) -> None:
+    def _notifies(self) -> bool:
+        return (isinstance(self.state, dict) and bool(self.state.get("_notify"))
+                and type(self.service).notifications is not Service.notifications)
+
+    def _flush(self, before: Any = None, by: str | None = None) -> list[dict[str, Any]]:
+        if before is not None and self._notifies():
+            self.service.notifications(self, before, self.state, by)
         out, self._outbox = self._outbox, []
         if out and self.hooks is not None and hasattr(self.hooks, "deliver"):
             for n in out:
                 self.hooks.deliver(self, n)
+        return out
 
     def tick(self) -> None:
         """Bring the world up to date: in realtime mode, let wall time pass and fire what's due.
@@ -430,8 +442,9 @@ class Instance:
             if advance:
                 self.advance(1)  # world events take a moment too, and so are strictly ordered in time
             actor = self.resolve_actor(as_)
+            before = _clone(self.state) if self._search_lags() or self._notifies() else None
             if self._search_lags():
-                self._remember(_clone(self.state))
+                self._remember(before)
             with self._acting(actor):
                 try:
                     result = act.fn(self, **(params or {}))
@@ -444,7 +457,7 @@ class Instance:
             self._clock.seq += 1
             self.events.append({"global_seq": self._clock.seq, "at": self.clock.isoformat(), "event": name,
                                 "params": copy.deepcopy(params or {}), "as": actor, "source": source})
-            self._flush()
+            self._flush(before, actor if as_ else None)
             return result
 
     def _call(self, name: str, args: dict[str, Any], agent: str | None) -> CallResult:
@@ -485,7 +498,9 @@ class Instance:
                 record["committed"] = not t.read_only
                 if not t.read_only:
                     self._remember(before)
-                self._flush()
+                sent = self._flush(before, self.actor)
+                if sent:
+                    record["notified"] = [{"to": n["to"], "subject": n["subject"]} for n in sent]
                 result = CallResult(self.service.render(value), False, value)
                 if fault is not None and fault.kind == "truncated":
                     cut = max(1, int(len(result.text) * 0.6))

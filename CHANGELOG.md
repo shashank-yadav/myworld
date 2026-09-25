@@ -13,6 +13,10 @@ Service behavior is versioned separately by date (`toolsim versions`); this file
   - Drive `2026-09-25.3`: everyone at the company has a My Drive; shares email the recipient;
     `user_google_email` must be the signed-in user.
   - GitHub users have company emails, so `as: alex@acme.com` works everywhere.
+  - Jira `2026-09-25.3`, GitHub `2026-09-25.3`, Linear `2026-09-25.2`: email notifications
+    (assignments, comments, @mentions, reviews, status changes, merges) to the people involved.
+  - Generated colleagues get their own background mail (Gmail `2026-09-25.2`).
+  - Version fingerprints include the emails a probe call sends.
 - **Noise and ambient activity for Linear and Notion**; generated colleagues exist in every tool.
 - **Multi-tool tests** (`tests/test_multitool.py`): identity everywhere, notifications and faults, forks,
   realtime, parallel episodes. `schedule-with-john` checks no longer pass on seeded or calendar mail;

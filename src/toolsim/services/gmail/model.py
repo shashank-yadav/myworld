@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import functools
 from email.utils import format_datetime, parseaddr
 from typing import Any
 
@@ -114,5 +115,6 @@ def _check_labels(state: dict[str, Any], ids: list[str] | None) -> list[str]:
     return ids
 
 
+@functools.lru_cache(maxsize=65536)
 def _addr(s: str) -> str:
     return parseaddr(s)[1].lower() or s.lower()

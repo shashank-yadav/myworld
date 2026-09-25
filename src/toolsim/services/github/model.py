@@ -14,6 +14,7 @@ from ...core.tools import ToolError
 API = "https://api.github.com"
 V1 = "2026-09-25.1"
 V2 = "2026-09-25.2"
+V3 = "2026-09-25.3"
 SEARCH_LAG = {"issues": 60, "repos": 60, "code": 300}  # seconds until the search index catches up
 CLOSING = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)\b", re.I)
 

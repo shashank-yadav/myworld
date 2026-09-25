@@ -130,7 +130,31 @@ def generate(seed: dict[str, Any], cfg: dict[str, Any], rng_seed: int, now: str)
                            "date": _iso(_past(rng, t_now, days) - dt.timedelta(days=days / 2)),
                            "body": f"Starting a separate thread on this: {str(e.get('body', ''))[:80]}"})
     seed["directory"] = sorted({*seed.get("directory", []), *(c["email"] for c in crowd)})
+    seed["company_mail"] = _company_mail(seed, cfg, rng_seed, t_now, me, crowd)
     return seed
+
+
+def _company_mail(seed: dict[str, Any], cfg: dict[str, Any], rng_seed: int, t_now: dt.datetime, me: str,
+                  crowd: list[dict[str, str]]) -> dict[str, list[dict[str, Any]]]:
+    """Everyone else's own background mail, for company mailboxes (read from 2026-09-25.2 on). Its
+    own random stream, so the default mailbox is the same as without it."""
+    rng = _rng(rng_seed, "gmail:company")
+    domain, org = me.split("@")[1], me.split("@")[1].split(".")[0]
+    seeded = {a.split("<")[-1].rstrip(">").strip().lower() for e in seed.get("emails", [])
+              for a in [e.get("from", ""), *(e.get("to") or [])] if a}
+    company = sorted({a for a in [*seeded, *seed.get("directory", [])] if a.endswith("@" + domain)} - {me})
+    out: dict[str, list[dict[str, Any]]] = {}
+    for addr in company:
+        others = [c for c in crowd if c["email"] != addr]
+        mails = out.setdefault(addr, [])
+        for i in range(int(cfg.get("colleague_emails", 25))):
+            m = _mail(rng, domain, org, others)
+            m.pop("colleague", None)
+            t = _past(rng, t_now, float(cfg.get("days", 30)))
+            read = rng.random() < (0.5 if (t_now - t).days < 2 else 0.9)
+            labels = [*(["INBOX"] if "SPAM" not in m["labels"] else []), *m.pop("labels"), *([] if read else ["UNREAD"])]
+            mails.append({**m, "to": [addr], "date": _iso(t), "labels": labels, "thread": f"company-{i}"})
+    return out
 
 
 def ambient(server: str, seed: dict[str, Any], times: list[int], rng: random.Random, rng_seed: int,

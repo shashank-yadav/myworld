@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from ...core.instance import Instance, Service
-from .model import SEARCH_LAG, V1, V2, _comment, _commit, _delay, _new_issue, _new_pull, _new_repo, _put_blob, _user
+from . import notify
+from .model import SEARCH_LAG, V1, V2, V3, _comment, _commit, _delay, _new_issue, _new_pull, _new_repo, _put_blob, _user
 
 
 class GitHub(Service):
@@ -17,7 +18,13 @@ class GitHub(Service):
                 V1: "Protected branches reject direct pushes, required approving reviews, closing keywords close "
                     "issues on merge, simulated CI runs on every push.",
                 V2: "Search is eventually consistent, like GitHub's: issues/PRs and repos show up in search about "
-                    "a minute after they change, code about five minutes (the list/get tools are immediate)."}
+                    "a minute after they change, code about five minutes (the list/get tools are immediate).",
+                V3: "Email notifications from notifications@github.com: assignments, comments, reviews, @mentions, "
+                    "merges and closes reach the thread's participants (not whoever acted) through any Gmail "
+                    "in the environment."}
+
+    def notifications(self, ctx: Instance, before: dict[str, Any], after: dict[str, Any], by: str | None) -> None:
+        notify.notifications(ctx, before, after, by)
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -68,6 +75,12 @@ class GitHub(Service):
             ctx.advance(90)
             c("search_issues", {"q": "repo:acme/api webhook retries"})
             c("search_code", {"q": "rotate repo:acme/api"})
+        if ctx.at_least(V3):
+            n = c("create_issue", {**o, "title": "Retry storm on webhook deploys", "assignees": ["john-park"],
+                                   "body": "cc @priya-shah"}).data["number"]
+            c("add_issue_comment", {**o, "issue_number": n, "body": "Looking now."}, as_="john@acme.com")
+            c("add_issue_comment", {**o, "issue_number": n, "body": "Thanks, @john-park"})
+            c("update_issue", {**o, "issue_number": n, "state": "closed"}, as_="john@acme.com")
 
     def default_seed(self) -> dict[str, Any]:
         retry_v1 = ("import random, time\n\n\ndef backoff(attempt: int) -> float:\n"
@@ -165,6 +178,8 @@ class GitHub(Service):
             state["_v1"] = True
         if ctx.at_least(V2):
             state["_search_lag"] = {**SEARCH_LAG, **(seed.get("search_lag") or {})}
+        if ctx.at_least(V3):
+            state["_notify"] = True
         return state
 
     actor_key = "viewer"

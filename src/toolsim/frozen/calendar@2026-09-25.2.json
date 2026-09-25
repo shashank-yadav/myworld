@@ -1,5 +1,5 @@
 {
- "behavior_sha256": "39262d95cd200becc12fae27ff1459ff9409a0d51640a2942b25229e00bf54e6",
+ "behavior_sha256": "1f250059856d7674d61f7e72e4f5a157e183e697712f7e657757406e1cf6842a",
  "changelog": "A company calendar system: colleagues known by free/busy or as attendees are full calendar users (agents can act as them), and invitations, updates and cancellations are emailed to attendees when Gmail is in the same environment.",
  "probe_calls": 24,
  "service": "calendar",

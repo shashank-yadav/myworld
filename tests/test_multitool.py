@@ -286,3 +286,77 @@ def test_seeded_mail_is_in_every_participant_mailbox():
     assert from_john[0]["subject"] in r.text
     old = EnvRun(Environment.from_dict({"name": "w", "servers": {"gmail": {"version": "2026-09-25.1"}}}))
     assert list(old.instances["gmail"].state["mailboxes"]) == ["alex@acme.com"]
+
+
+# -- jira / github / linear -> gmail ---------------------------------------------------------------
+
+def mail_to(run, who, needle):
+    box = run.instances["gmail"].state["mailboxes"][who]["messages"].values()
+    return [m for m in box if needle in m["subject"]]
+
+
+def test_jira_emails_assignees_and_commenters_but_not_the_actor():
+    run = world("gmail", "jira")
+    j = run.instances["jira"]
+    data(j.call("jira_assign_issue", {"issue_key": "OPS-4", "assignee": "john@acme.com"}))
+    [m] = mail_to(run, "john@acme.com", "[JIRA] (OPS-4)")
+    assert "Alex Rivera assigned OPS-4 to you." in m["body"] and "jira@acme.atlassian.net" in m["from"]
+    assert not mail_to(run, "alex@acme.com", "[JIRA] (OPS-4)"), "you don't get mail about your own changes"
+    data(j.call("jira_add_comment", {"issue_key": "OPS-4", "body": "On it."}, as_="john@acme.com"))
+    assert any("John Park commented on OPS-4" in m["body"] for m in mail_to(run, "alex@acme.com", "(OPS-4)"))
+    before = len(mail_to(run, "alex@acme.com", "(OPS-4)"))
+    assert j.call("jira_transition_issue", {"issue_key": "OPS-4", "transition_id": "999"}, as_="john@acme.com").is_error
+    assert len(mail_to(run, "alex@acme.com", "(OPS-4)")) == before, "a failed transition emails nobody"
+
+
+def test_world_events_in_jira_email_you_too():
+    run = world("gmail", "jira")
+    run.inject("jira", "add_comment", {"issue_key": "OPS-2", "author": "john", "body": "Rotated staging already."})
+    assert any("Rotated staging" in m["body"] for m in mail_to(run, "alex@acme.com", "(OPS-2)"))
+
+
+def test_github_mentions_reviews_and_merges_reach_participants():
+    run = world("gmail", "github")
+    g = run.instances["github"]
+    o = {"owner": "acme", "repo": "api"}
+    n = data(g.call("create_issue", {**o, "title": "Flaky deploys", "body": "cc @priya-shah",
+                                     "assignees": ["john-park"]}))["number"]
+    [m] = mail_to(run, "john@acme.com", f"(Issue #{n})")
+    assert m["subject"] == f"[acme/api] Flaky deploys (Issue #{n})" and "you were assigned" in m["body"]
+    assert mail_to(run, "priya@acme.com", f"(Issue #{n})"), "@mentioned"
+    data(g.call("add_issue_comment", {**o, "issue_number": n, "body": "Looking."}, as_="john@acme.com"))
+    for who in ("alex@acme.com", "priya@acme.com"):
+        assert any(x["subject"].startswith("Re: [acme/api] Flaky deploys") for x in mail_to(run, who, f"#{n})"))
+    assert len(mail_to(run, "john@acme.com", f"(Issue #{n})")) == 1, "not for your own comment"
+
+
+def test_linear_assignment_mention_and_status_change():
+    run = world("gmail", "linear")
+    lin = run.instances["linear"]
+    data(lin.call("update_issue", {"id": "ENG-2", "assignee": "john@acme.com"}))
+    assert any("assigned ENG-2 to you" in m["body"] for m in mail_to(run, "john@acme.com", "ENG-2"))
+    data(lin.call("create_comment", {"issueId": "ENG-2", "body": "@priya can you pair?"}))
+    assert mail_to(run, "priya@acme.com", "ENG-2")
+    data(lin.call("update_issue", {"id": "ENG-2", "state": "In Progress"}, as_="john@acme.com"))
+    assert any("changed the status to In Progress" in m["body"] for m in mail_to(run, "alex@acme.com", "ENG-2"))
+
+
+@pytest.mark.parametrize("server,version", [("jira", "2026-09-25.2"), ("github", "2026-09-25.2"),
+                                            ("linear", "2026-09-25.1")])
+def test_older_tracker_versions_send_no_mail(server, version):
+    run = EnvRun(Environment.from_dict({"name": "w", "servers": {"gmail": {}, server: {"version": version}}}))
+    call = {"jira": ("jira_assign_issue", {"issue_key": "OPS-4", "assignee": "john@acme.com"}),
+            "github": ("create_issue", {"owner": "acme", "repo": "api", "title": "x", "assignees": ["john-park"]}),
+            "linear": ("update_issue", {"id": "ENG-2", "assignee": "john@acme.com"})}[server]
+    data(run.instances[server].call(*call))
+    assert not any(x.get("event") == "deliver_email" for x in run.timeline())
+
+
+def test_colleagues_have_their_own_background_mail():
+    run = EnvRun(Environment.from_dict({"name": "w", "rng_seed": 2, "servers": {"gmail": {"noise": True}}}))
+    boxes = run.instances["gmail"].state["mailboxes"]
+    assert len(boxes) > 10 and all(len(b["messages"]) >= 20 for b in boxes.values())
+    old = EnvRun(Environment.from_dict({"name": "w", "rng_seed": 2,
+                                        "servers": {"gmail": {"noise": True, "version": "2026-09-25.1"}}}))
+    alex = lambda r: sorted(m["subject"] for m in r.instances["gmail"].state["mailboxes"]["alex@acme.com"]["messages"].values())  # noqa: E731
+    assert set(alex(old)) <= set(alex(run)), "Alex's own generated mail is the same with or without company mail"

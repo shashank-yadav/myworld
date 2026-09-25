@@ -202,6 +202,10 @@ ambient: {hours: 8, gmail: 6, slack: 20, github: 2, jira: 3, calendar: 1, linear
 With Gmail in the environment, other tools' emails land in the recipient's mailbox:
 - Calendar invitations, updates, cancellations (honoring `sendUpdates`) and RSVP replies.
 - Drive share notifications.
+- Jira, GitHub and Linear notifications: assignments, comments, @mentions, reviews, status changes,
+  merges. They go to the people involved, never to whoever made the change.
+
+With noise on, colleagues' mailboxes have their own background mail too.
 
 Everyone at the company has a mailbox, a calendar and a My Drive, so a second agent `as: john@acme.com`
 reads the invite Alex sent and answers it. A failed call sends nothing.

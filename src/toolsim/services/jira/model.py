@@ -12,6 +12,7 @@ from ...core.tools import ToolError
 SITE = "https://acme.atlassian.net"
 V1 = "2026-09-25.1"
 V2 = "2026-09-25.2"
+V3 = "2026-09-25.3"
 SEARCH_LAG = {"issues": 10}  # seconds until JQL search reflects a change
 STATUSES = {"To Do": "new", "In Progress": "indeterminate", "In Review": "indeterminate", "Done": "done"}
 # the workflow: from-status -> [(transition id, name, to-status)]

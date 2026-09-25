@@ -10,6 +10,7 @@ from ...core.instance import Instance
 from ...core.tools import ToolError
 
 V1 = "2026-09-25.1"
+V2 = "2026-09-25.2"
 SCALES = {"fibonacci": [1, 2, 3, 5, 8], "exponential": [1, 2, 4, 8, 16], "linear": [1, 2, 3, 4, 5],
           "tshirt": [1, 2, 3, 5, 8], "none": []}
 PRIORITY_NAMES = {0: "No priority", 1: "Urgent", 2: "High", 3: "Medium", 4: "Low"}

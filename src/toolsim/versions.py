@@ -28,7 +28,8 @@ def fingerprint(service: str, version: str) -> dict[str, Any]:
     inst = Instance(svc, rng_seed=0, version=version)
     tools = inst.list_tools()
     svc.probe(inst)
-    trace = [{"tool": c["tool"], "args": c["args"], "ok": c["ok"], "result": c["result"]} for c in inst.calls]
+    trace = [{"tool": c["tool"], "args": c["args"], "ok": c["ok"], "result": c["result"],
+              **({"notified": c["notified"]} if c.get("notified") else {})} for c in inst.calls]
     behavior = hashlib.sha256(json.dumps(trace, sort_keys=True, default=str).encode()).hexdigest()
     return {"service": service, "version": version, "changelog": svc.versions[version],
             "behavior_sha256": behavior, "probe_calls": len(trace), "tools": tools}

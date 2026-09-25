@@ -6,11 +6,13 @@ import datetime as dt
 from typing import Any
 
 from ...core.instance import Instance, Service
+from . import notify
 from ...core.tools import ToolError
 from .model import (
     DEFAULT_STATES,
     SCALES,
     V1,
+    V2,
     _comment,
     _create,
     _find_cycle,
@@ -29,7 +31,13 @@ class Linear(Service):
     description = "Simulated Linear workspace. Behaves like Linear's MCP server; nothing is really changed."
     fidelity = "preview"  # tool names are real; some parameters/response shapes are inferred
     versions = {"2026-09-25": "Initial release: 23 tools modeled on Linear's hosted MCP server.",
-                V1: "Cycles on issues, team estimate scales, exclusive label groups, cursor pagination for list_issues."}
+                V1: "Cycles on issues, team estimate scales, exclusive label groups, cursor pagination for list_issues.",
+                V2: "Email notifications from notifications@linear.app: assignments, comments, @mentions and status "
+                    "changes reach the creator, assignee and commenters (not whoever acted) through any Gmail in "
+                    "the environment."}
+
+    def notifications(self, ctx: Instance, before: dict[str, Any], after: dict[str, Any], by: str | None) -> None:
+        notify.notifications(ctx, before, after, by)
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -61,6 +69,11 @@ class Linear(Service):
             c("list_issues", {"team": "ENG", "limit": 2, "cursor": page["nextCursor"]})
             c("list_issues", {"cycle": "current"})
             c("list_issue_labels", {"team": "ENG"})
+        if ctx.at_least(V2):
+            c("update_issue", {"id": "ENG-2", "assignee": "john@acme.com"})
+            c("create_comment", {"issueId": "ENG-2", "body": "Can you pair with @priya on this?"})
+            c("create_comment", {"issueId": "ENG-2", "body": "Yes, tomorrow."}, as_="john@acme.com")
+            c("update_issue", {"id": "ENG-2", "state": "In Progress"}, as_="john@acme.com")
 
     def default_seed(self) -> dict[str, Any]:
         return {
@@ -131,6 +144,8 @@ class Linear(Service):
                                           "url": f"https://linear.app/acme/project/{_slug(p['name'])}-{pid[:12]}", "labels": []}
             if ctx.at_least(V1):
                 state["_v1"] = True
+            if ctx.at_least(V2):
+                state["_notify"] = True
             for i in t.get("issues", []):
                 issue = _create(ctx, state, {**i, "team": t["key"]}, creator=state["viewer"])
                 if i.get("cycle") and state.get("_v1"):

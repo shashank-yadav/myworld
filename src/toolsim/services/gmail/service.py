@@ -120,7 +120,8 @@ class Gmail(Service):
             for addr in state["_directory"]:
                 if addr.rsplit("@", 1)[-1] in state["_domains"] and addr not in state["mailboxes"]:
                     user = {"email": addr, "name": names.get(addr) or addr.split("@")[0].replace(".", " ").title()}
-                    state["mailboxes"][addr] = _new_mailbox(ctx, {}, user)
+                    own = (seed.get("company_mail") or {}).get(addr, [])  # generated: their own background mail
+                    state["mailboxes"][addr] = _new_mailbox(ctx, {"emails": own}, user)
             _mirror(ctx, state)
         state["_auto_replies"] = list(seed.get("auto_replies", []))
         state["_daily_send_limit"] = int(seed.get("daily_send_limit", 2000))
