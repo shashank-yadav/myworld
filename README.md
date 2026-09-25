@@ -5,12 +5,22 @@ Real-world RL environments for agents: faithful, stateful replicas of the tools 
 with rewards computed from the resulting world.
 
 Most of these tools have no test mode, and toy environments don't transfer. toolsim gives every
-episode its own copy of each tool: the same MCP tool names and schemas as the popular real MCP
-servers, realistic state at realistic volume, a world that keeps moving, realistic errors, and
-failures you can inject on purpose. Every episode is deterministic given its seed and can be
-snapshotted and forked.
+episode its own copy of each tool:
+- the same MCP tool names and schemas as the popular real MCP servers;
+- realistic state at realistic volume, and a world that keeps moving;
+- realistic errors, plus failures you can inject on purpose.
 
-## RL episodes
+Every episode is deterministic given its seed, and can be snapshotted and forked.
+
+```bash
+uv sync
+uv run toolsim tasks -n 1000 --out tasks.jsonl     # validated tasks, each with verifiers and a reference solution
+uv run toolsim bench -n 200 --workers 8            # play the reference solutions in parallel
+```
+
+## RL
+
+### Episodes
 
 ```python
 from toolsim.rl import ToolEnv
@@ -19,48 +29,73 @@ env = ToolEnv("envs/merge-when-green.yaml", max_steps=30)
 obs, info = env.reset(seed=7)                 # obs["task"], obs["tools"] (Anthropic/OpenAI-ready)
 obs, reward, terminated, truncated, info = env.step(
     {"tool": "github__get_pull_request_status", "arguments": {"owner": "acme", "repo": "api", "pull_number": 4}})
-...
+env.step({"tool": "wait", "arguments": {"seconds": 300}})                      # let CI finish
 env.step({"tool": "submit", "arguments": {"answer": "Merged #4 as 3f2a…"}})   # ends the episode
 env.trajectory()                              # steps, world events, answer, per-check grade, return
 ```
 
 - **Rewards come from the world, not the transcript.** Checks inspect final state, calls and the
-  answer. `weight` gives partial credit, and `must: true` makes a check a hard constraint (reward 0 if
-  violated, e.g. "never emailed the attacker"). Rewards are sparse by default; `dense=True` pays the
-  change in score each step, and `step_penalty` charges per call.
+  answer. `weight` gives partial credit. `must: true` makes a check a hard constraint: if it
+  fails, the reward is 0 (e.g. "never emailed the attacker", "archived only that sender").
+  - Answer checks resist stuffing, with `max_len` and forbidden distractor values (`not`).
+  - Rewards are sparse by default; `dense=True` pays the change in score each step, and
+    `step_penalty` charges per call.
 - **Randomized per episode:** `reset(seed=…)` rebuilds the world with that seed's generated noise
-  and background activity (see below). The same seed and the same actions give the same rollout.
+  and background activity. The same seed and the same actions give the same rollout.
+- **Time:** episodes run in virtual time, as fast as the agent acts.
+  - `wait` lets time pass (CI, replies).
+  - `step(action, elapsed=s)` charges the model's thinking time.
 - **Branching:** `fork()` and `snapshot()`/`restore()` copy an episode mid-way, for tree search
   or many rollouts from one hard state.
-- **Tasks at scale:** `toolsim tasks -n 5000 --out tasks.jsonl` (or `toolsim.tasks.generate`) writes
-  validated tasks from 12 families across all six tools and across tools (reply to a colleague,
-  archive one sender and nothing else, book a slot you're both free for, label every matching
-  issue while keeping existing labels, merge only if green, reassign someone's open work, share the
-  current file and not its old copy, file a bug from the latest escalation email, ...). Each task
-  is written from what's actually in its seeded world, with verifiers, `must` constraints for
-  collateral damage, and a reference solution. Every task is checked before it's kept: the
-  reference solution scores 1.0 and doing nothing scores less. `--hard` adds flaky APIs.
-- **Over HTTP** (remote trainers, MCP-native agents): `POST /envs {file|spec, seed}` returns MCP
-  URLs, the agent works through MCP, and `POST /envs/{id}/submit {answer}` returns the reward.
 
-## Blocks
+### Tasks
 
+`toolsim tasks -n 5000 --out tasks.jsonl` (or `toolsim.rl.generate`) writes tasks from 20
+families (`toolsim tasks --list`), for single tools and across tools:
+- reply to a colleague;
+- archive one sender and nothing else;
+- book a slot you're both free for;
+- cancel one occurrence of a recurring meeting;
+- answer in the right Slack thread;
+- label every matching issue while keeping existing labels;
+- merge only if green;
+- move a Jira issue through its workflow;
+- share the current file, not its old copy;
+- change one cell of a sheet;
+- file a bug from the latest escalation email;
+- book the meeting a colleague asked for by email, and more.
+
+Each task is written from what's actually in its seeded world. It comes with verifiers, `must`
+constraints for collateral damage, and a reference solution.
+
+Every task is validated before it's kept:
+- the reference solution scores 1.0;
+- doing nothing scores less;
+- an answer stuffed with every value in the world scores less.
+
+`--hard` adds flaky APIs; the reference solution retries, as a careful agent would.
+
+### Parallel episodes
+
+```python
+from toolsim.rl import EnvPool, generate
+
+with EnvPool(workers=8, max_steps=40) as pool:
+    observations = pool.reset(generate(256, seed=0))        # [(obs, info)] per episode
+    results = pool.step(actions)                            # one action per episode, or None to skip
+    rollouts = pool.trajectories()
 ```
-Environment  (task + subset of servers + seeds + faults + checks)      envs/*.yaml
-   │
-   ├── Instance: gmail      ── own state, clock, IDs, faults, call log
-   ├── Instance: calendar   ── ...
-   └── Instance: slack      ── ...
-          │
-      Service (Gmail, Calendar, Slack, GitHub): state model + tools + errors, written against the real API
-```
 
-- **Service:** one simulated tool. It matches the real MCP server's interface, and its state and
-  errors follow the real API.
-- **Instance:** one isolated copy of a service. It's deterministic (the same seed gives the same
-  IDs and timestamps every run), and it can be snapshotted, restored, forked and reset.
-  Instances never share state.
-- **Environment:** a task that uses any subset of services, with seed data, faults and checks.
+Each episode stays in one worker process for its whole life. On a 10-core laptop, reference
+rollouts ran at about 340 episodes/s (1,000+ steps/s) with 8 workers (`toolsim bench`).
+
+### Over HTTP
+
+For remote trainers and MCP-native agents:
+- `POST /envs {file|spec, seed}` returns MCP URLs, and the agent works through MCP.
+- `POST /envs/{id}/submit {answer}` returns the reward.
+
+## The tools
 
 | Service | Tools | Interface matches | Fidelity | Built-in traps |
 |---|---|---|---|---|
@@ -73,16 +108,60 @@ Environment  (task + subset of servers + seeds + faults + checks)      envs/*.ya
 | `linear` | 23 | Linear hosted MCP | preview | team-scoped states and labels, exclusive label groups, estimate scales, cycles, cursor pagination |
 | `notion` | 12 | Notion hosted MCP (core tools) | preview | restricted pages are invisible, view/comment-only pages, strict status options, typed filters, lagging search, async duplication |
 
-*documented*: tool names and parameters come from the real server's published reference.
-*preview*: tool names are real, but some parameters or response shapes are inferred.
+- *documented*: tool names and parameters come from the real server's published reference.
+- *preview*: tool names are real, but some parameters or response shapes are inferred.
 
-## Multiple agents
+Each service is a *workspace*, not one account:
+- Gmail delivers, filters and threads mail between colleagues.
+- Calendar invites appear on attendees' calendars and RSVPs flow back.
+- The other tools act with each person's identity and permissions.
 
-Several agents can share one environment, each acting as a different person. Services are
-whole workspaces:
-- Gmail is the company mail system: mail between colleagues is delivered, filtered and threaded.
-- In Calendar, invites appear on attendees' calendars and RSVPs flow back to the organizer.
-- In Slack, GitHub, Jira, Linear, Notion and Drive, calls act with that person's identity and permissions.
+**Versions:** each service has date-based versions (e.g. `gmail@2026-09-25`, `github@2026-09-25.2`),
+and environments can pin one (`gmail: {version: 2026-09-25}`).
+- Every released version is frozen in `src/toolsim/frozen/`: its tool definitions plus a hash of its
+  behavior on a fixed probe script.
+- The tests fail if the code changes what a released version does, so every change ships as a
+  new version.
+- `toolsim versions` shows the status, and `toolsim freeze` freezes new versions.
+
+## Worlds
+
+An **environment** (`envs/*.yaml`) is a task over a subset of the tools. It sets:
+- seed data;
+- agents;
+- faults;
+- world events;
+- checks.
+
+Each run gets one isolated **instance** per tool. All instances share a clock and can be
+snapshotted, restored, forked and reset atomically.
+
+### Checks
+
+```yaml
+checks:
+  - name: John emailed exactly once
+    server: gmail
+    state: messages                          # a collection in the final state
+    where: {labelIds: [SENT], to: [john@acme.com]}
+    count: 1
+  - {name: checked availability first, server: calendar, calls: get-freebusy, min: 1}
+  - {name: changed nothing on GitHub, server: github, calls: "*", where: {committed: true}, count: 0, must: true}
+  - name: reported the merge commit
+    answer: {contains: {server: github, state: "repos[acme/api].pulls", where: {number: 4}, field: merge_commit_sha}}
+    weight: 2
+```
+
+`where` matchers:
+- plain values match exactly (lists: "contains all");
+- `key~` is a case-insensitive substring;
+- `key~re` is a regex;
+- `!key` negates a matcher;
+- dotted keys reach into nested objects and lists.
+
+Bounds are `count`, `min` and `max`.
+
+### Several agents
 
 ```yaml
 agents:
@@ -92,142 +171,15 @@ checks:
   - {name: John's agent accepted, server: calendar, calls: respond-to-event, agent: john, min: 1}
 ```
 
-Each agent gets its own MCP URLs (`…/mcp?agent=john&as=john@acme.com`). Every call is attributed,
-and the whole environment shares one clock, so `GET /envs/{id}/calls` is a single timeline of who
-did what. See `envs/schedule-with-john.yaml`.
+Each agent gets its own MCP URLs (`…/mcp?agent=john&as=john@acme.com`), and every call is
+attributed. `GET /envs/{id}/timeline` is one ordered timeline of who did what.
 
-## Snapshots and forks
-
-`POST /envs/{id}/snapshot`, `restore`, `fork` and `reset` work on the whole environment at once,
-atomically across every server. Fork a multi-agent run at any step and continue each branch
-independently. Single instances support the same operations.
-
-## Versions
-
-Each service has date-based versions (e.g. `gmail@2026-09-25`), and environments can pin one:
-`gmail: {version: 2026-09-25}`. Every released version is frozen in `src/toolsim/frozen/`: its
-exact tool definitions plus a hash of its behavior on a fixed probe script. The tests fail if the
-code changes what a released version does, so any change has to ship as a new dated version, with
-older dates kept working. `toolsim versions` shows the status, and `toolsim freeze` freezes new versions.
-
-## Faults
-
-Real services fail. Environments say how:
-
-```yaml
-faults:
-  - {server: gmail, tool: send_email, kind: timeout_after_commit, on_call: 1}   # sent, but reports a timeout
-  - {server: github, tool: "*", kind: rate_limit, probability: 0.1, times: null}
-```
-
-Kinds:
-- **Timeouts:** `timeout` (nothing happened) and `timeout_after_commit` (it happened, then timed out; this is how duplicates get created).
-- **HTTP-style errors, in each service's own error format:** `not_found` (404), `server_error` (500, or `status: 502/503/504`), `bad_gateway`, `unavailable`, `rate_limit` (429 with retry-after), and `error` (a custom payload).
-- **Slow calls:** `latency`, with `hang_s` (real seconds, to test client timeouts) and `delay_s` (virtual time passes, so world events can fire meanwhile).
-- **Transport and proxy failures:** `transport_error` (an HTML 502/503 page instead of an MCP reply), `truncated` (the response is cut off mid-JSON) and `duplicate_commit` (a retrying proxy performs the write twice).
-
-A fault fires on the Nth matching call, with a seeded probability, or throughout a window
-(`from_call`/`until_call`, or `start`/`end` in virtual time) for an outage. Faults are reproducible.
-
-## Environments from real data
-
-Build a world from exports of your real tools. No accounts or API access are needed:
-
-```bash
-toolsim import gmail    "Takeout/Mail/All mail.mbox"  -o seeds/gmail.yaml    --anonymize --map people.json --rebase 2026-09-21T16:00:00Z
-toolsim import calendar Takeout/Calendar/me.ics       -o seeds/calendar.yaml --anonymize --map people.json
-toolsim import slack    acme-slack-export.zip         -o seeds/slack.yaml    --anonymize --map people.json
-toolsim import github   ~/src/api --issues issues.json --pulls prs.json -o seeds/github.yaml
-toolsim import jira     jira-export.csv               -o seeds/jira.yaml --me "Dana Wu"
-toolsim import drive    Takeout/Drive                 -o seeds/drive.yaml
-```
-
-| Source | Export | What's kept |
-|---|---|---|
-| Gmail | Google Takeout mbox | senders/recipients, bodies (HTML becomes text), labels, threads, attachment metadata |
-| Calendar | `.ics` (Takeout or any iCalendar) | time zones, attendees and RSVPs, organizers, recurrence, free vs busy |
-| Slack | workspace export (zip or folder) | users, channels and members, messages, threads, reactions, @mentions |
-| GitHub | a local clone + `gh issue/pr list --json` | files, branches with their changes, issues, PRs and comments, **original numbers** |
-| Jira | CSV export or REST search JSON | **original keys**, status/type/priority mapped to the workflow, labels, comments, epics |
-| Drive | a folder (e.g. Takeout/Drive) | folder tree, text content (including `.docx`), file types and sizes |
-
-Import options:
-- `--anonymize`: every real person gets a consistent pseudonym, and emails and phone numbers inside text are masked.
-- `--map people.json`: keeps pseudonyms identical across imports, so "Dana" is the same fake person in Gmail, Slack and Jira.
-- `--keep-domain`: leaves vendors such as stripe.com as they are.
-- `--rebase`: shifts time so the newest item is the environment's "now".
-- `--limit`: caps the size.
-
-The resulting seed files drop into any environment (`seed_file:`), together with issues, events and agents.
-
-## Issues: realistic trouble, one line each
-
-```yaml
-issues:
-  - use: prompt_injection_email                  # an email with instructions aimed at the AI
-  - use: slot_taken                              # the attendee books the slot right after the agent checks
-    params: {attendee: john@acme.com, start: "2026-09-22T10:00:00-07:00", end: "2026-09-22T11:00:00-07:00"}
-  - use: search_lag                              # sent mail isn't searchable for a while: tempts a resend
-    params: {seconds: 600, recipient: john@acme.com}
-  - use: outage                                  # 503s for a window of calls or time, then recovery
-    params: {server: gmail, tool: send_email, from_call: 1, until_call: 2}
-```
-
-Each issue expands into world events, faults and `[issue: …]` checks, so a report shows which problems
-the agent handled. `toolsim issues` lists all 18:
-- **Data and security:** prompt injection, lookalike sender, similar names.
-- **Races and the world changing:** the slot gets taken, CI flips before merge, the base branch moves,
-  access is revoked, a document goes stale, the requester changes their mind.
-- **Consistency:** search index lag.
-- **Reliability:** flaky APIs (429/500/502/503), slow services, outages, 404 blips, truncated
-  responses, duplicate delivery, ambiguous timeouts.
-
-## World events
-
-The world changes while agents work. Events run a service's *world action* (mail arriving, a
-colleague booking time, CI finishing, access being revoked) on a trigger:
-
-```yaml
-events:
-  - {server: gmail, action: deliver_email, at: "+10m", params: {to: alex@acme.com, sender: …, subject: …, body: …}}
-  - {server: calendar, action: add_event, after: {tool: get-freebusy, agent: alex}, params: {…}}
-  - {server: github, action: set_status, before: {tool: merge_pull_request}, params: {…}}
-  - {server: drive, action: revoke_access, after_calls: 5, params: {…}}
-```
-
-Services also react on their own (from the `2026-09-25.1` versions), with a realistic delay:
-mail to a typo'd address bounces, out-of-office and colleague replies arrive (`auto_replies`),
-invitees answer by policy (`auto_respond`), Slack colleagues reply (`responders`), and CI finishes
-after a push (`ci`). These are scheduled in virtual time, so they land when time passes (the
-agent's later calls, `advance`, or latency faults), and they're part of snapshots.
-
-Events without a trigger are part of the starting world. Events are deterministic, and snapshots
-and forks include which ones have fired. A harness can also inject events into a live run
-(`POST /envs/{id}/events`) and let virtual time pass (`POST /envs/{id}/advance`).
-`GET /envs/{id}/timeline` shows agent calls and world events together.
-
-## Time: virtual or realtime
-
-- **virtual** (default): as fast as possible and deterministic. Time moves only when something
-  takes time: each call (1-3 s), `wait` in RL episodes, `step(..., elapsed=s)` for model thinking,
-  `POST /envs/{id}/advance`, latency faults. Use it for RL and tests.
-- **realtime**: simulated time follows the wall clock, so a live agent that thinks for 30 s sees
-  30 s pass, and CI, replies and timed events arrive on schedule, even between calls. Speed it up
-  with a factor (`60` = a simulated minute per real second). Use it for live agents over MCP and demos.
-  Not deterministic.
-
-Set it per environment (`time: realtime`, `time: {speed: 60}`), per run (`POST /envs {"time": ...}`),
-or as a host default (`toolsim serve --time realtime`, `toolsim stdio gmail --time 60`).
-
-## Volume, distractors and background activity
-
-Real workspaces are noisy, and agents that ace five hand-written items often fail at real volume.
-Turn on generated noise per server, and background activity for the whole run:
+### Volume, distractors and background activity
 
 ```yaml
 servers:
   gmail: {noise: {emails: 300}}          # newsletters, notifications, receipts, colleague threads, spam
-  slack: {noise: {messages: 400}}        # more people, more channels, threads and reactions
+  slack: {noise: {messages: 400}}        # more people and channels, threads and reactions
   calendar: {noise: {density: 0.5}}      # recurring 1:1s, team syncs, meetings, busier colleagues
   github: {noise: {issues: 60, pulls: 4}}
   jira: {noise: {issues: 80}}
@@ -235,89 +187,149 @@ servers:
 ambient: {hours: 8, gmail: 6, slack: 20, github: 2, jira: 3, calendar: 1}   # events per hour
 ```
 
-- **Distractors:** near-duplicates of the seeded items ("Q4 budget (old)", an older thread with a
-  similar subject, a follow-up issue) that the agent has to tell apart.
-- **Per-episode randomization:** everything comes from `rng_seed`. The same seed rebuilds the same
-  world, and a new seed gives a different but equally plausible one.
-- **Safe for checks:** seeded items keep their ids and numbers. Generated people are new, and
-  generated sent mail only goes to them. Background activity only touches generated items, so
-  checks about the task keep their meaning.
+- **Distractors:** the noise includes near-duplicates of the seeded items ("Q4 budget (old)", an
+  older thread with a similar subject).
+- **Seeded:** everything comes from `rng_seed`.
+- **Safe for checks:** seeded items keep their ids and numbers, generated people are new, and
+  background activity only touches generated items.
 
-## Checks
+### The world moves on its own
 
-Checks grade the end of a run, against the final **state** (what's true in the world) or the
-**calls** the agent made:
+**World events** run a service's world action on a trigger:
 
 ```yaml
-checks:
-  - name: John emailed exactly once
-    server: gmail
-    state: messages
-    where: {labelIds: [SENT], to: [john@acme.com]}
-    count: 1
-  - name: checked availability first
-    server: calendar
-    calls: get-freebusy
-    min: 1
+events:
+  - {server: gmail, action: deliver_email, at: "+10m", params: {sender: …, subject: …, body: …}}
+  - {server: calendar, action: add_event, after: {tool: get-freebusy, agent: alex}, params: {…}}
+  - {server: github, action: set_status, before: {tool: merge_pull_request}, params: {…}}
+  - {server: drive, action: revoke_access, after_calls: 5, params: {…}}
 ```
 
-## Run
+Services also react with realistic delays:
+- mail to a typo'd address bounces;
+- out-of-office and colleague replies arrive (`auto_replies`);
+- invitees answer by policy (`auto_respond`);
+- Slack colleagues reply (`responders`);
+- CI finishes after a push (`ci`);
+- search indexes catch up with writes;
+- Notion duplicates complete.
+
+A harness can also inject events into a live run (`POST /envs/{id}/events`).
+
+### Time: virtual or realtime
+
+- **virtual** (default): as fast as possible and deterministic.
+  - Time moves only when something takes time: calls (1–3 s each), `wait`, `elapsed`,
+    `POST /envs/{id}/advance`, latency faults.
+  - Use it for RL and tests.
+- **realtime**: simulated time follows the wall clock, so CI, replies and timed events arrive on
+  schedule even between calls.
+  - Speed it up with a factor (`60` = a simulated minute per real second).
+  - Use it for live agents over MCP and demos. It isn't deterministic.
+
+Set the mode per environment (`time: realtime`, `time: {speed: 60}`), per run
+(`POST /envs {"time": ...}`), or as a host default (`toolsim serve --time realtime`,
+`toolsim stdio gmail --time 60`).
+
+### Issues: realistic trouble, one line each
+
+```yaml
+issues:
+  - use: prompt_injection_email
+  - use: slot_taken
+    params: {attendee: john@acme.com, start: "2026-09-22T10:00:00-07:00", end: "2026-09-22T11:00:00-07:00"}
+  - use: outage
+    params: {server: gmail, tool: send_email, from_call: 1, until_call: 2}
+```
+
+Each issue expands into events, faults and `[issue: …]` checks. `toolsim issues` lists all 18:
+- **Data and security:** prompt injection, lookalike sender, similar names.
+- **Races:** the slot gets taken, CI flips before merge, the base branch moves, access is
+  revoked, a document goes stale, the requester changes their mind.
+- **Consistency:** search lag.
+- **Reliability:** flaky APIs, slow services, outages, 404 blips, truncated responses, duplicate
+  delivery, ambiguous timeouts.
+
+### Faults
+
+```yaml
+faults:
+  - {server: gmail, tool: send_email, kind: timeout_after_commit, on_call: 1}   # sent, but reports a timeout
+  - {server: github, tool: "*", kind: rate_limit, probability: 0.1}
+```
+
+Kinds:
+- **Timeouts:** `timeout` and `timeout_after_commit`.
+- **Errors, in each service's own error shape:** `not_found`, `server_error` (with `status`),
+  `bad_gateway`, `unavailable`, `rate_limit`, `error`.
+- **Slowness:** `latency`, with `hang_s` in real seconds and `delay_s` in virtual time.
+- **Transport and proxy failures:** `transport_error` (an HTML error page), `truncated`,
+  `duplicate_commit`.
+
+A fault fires on the Nth call, with a seeded probability, or throughout a window of calls or time.
+
+### From real data
 
 ```bash
-uv sync
-uv run toolsim services
+toolsim import gmail    "Takeout/Mail/All mail.mbox"  -o seeds/gmail.yaml --anonymize --map people.json
+toolsim import calendar Takeout/Calendar/me.ics       -o seeds/calendar.yaml --anonymize --map people.json
+toolsim import slack    acme-slack-export.zip         -o seeds/slack.yaml --anonymize --map people.json
+toolsim import github   ~/src/api --issues issues.json --pulls prs.json -o seeds/github.yaml
+toolsim import jira     jira-export.csv               -o seeds/jira.yaml --me "Dana Wu"
+toolsim import drive    Takeout/Drive                 -o seeds/drive.yaml
+```
+
+No accounts or API access are needed. Options:
+- `--anonymize` gives every person a consistent pseudonym, and masks emails and phone numbers in text.
+- `--map people.json` keeps pseudonyms the same across tools.
+- `--rebase` moves time so the newest item is "now".
+- `--limit` caps the size.
+
+The resulting seed files drop into any environment with `seed_file:`.
+
+## Run and deploy
+
+```bash
 uv run toolsim serve --env envs/schedule-with-john.yaml  # prints each agent's task and MCP config
 uv run toolsim grade envs/schedule-with-john.yaml        # after the agents finish
+uv run toolsim stdio gmail                               # one instance over stdio, for command-configured MCP clients
+docker build -t toolsim . && docker run -e TOOLSIM_TOKEN=change-me -p 8765:8765 toolsim
 ```
 
-Or run a single instance over stdio for agents configured with a command:
+The control API (`/docs`) covers environments, instances, snapshots, forks, events, time, grading
+and submission.
 
-```yaml
-# e.g. Hermes ~/.hermes/config.yaml
-mcp_servers:
-  gmail: {command: toolsim, args: [stdio, gmail]}
+Security:
+- **Authentication:** requests need a bearer token (or `?token=`) when one is set, except `/healthz`.
+  The host won't bind beyond localhost without a token unless you pass `--no-auth`.
+- **Origin checks:** browser Origin headers are checked (the MCP spec's DNS-rebinding guidance).
+- **Files:** environment files load only from `--env-dir`, and `seed_file` stays inside its
+  environment's directory.
+- **Limits:** instances, snapshots, fault delays and request size are capped.
+
+State lives in memory in one process: snapshots are for branching, not durability.
+
+## Code layout
+
+```
+src/toolsim/
+  core/          the engine: instances, clock, tools and validation, faults, MCP
+  services/      one package per tool: service, model, tools by area, world actions, noise, importer
+  env.py         environments, runs, checks and grading
+  issues.py      the issue library
+  noise.py       shared pools for generated worlds; dispatches to each tool's noise.py
+  importers/     the import registry and shared options
+  rl/            episodes (ToolEnv), parallel pool (EnvPool), task families (rl/tasks/)
+  host.py        HTTP host (MCP endpoints and control API)
+  cli.py         toolsim ...
+  frozen/        fingerprints of every released service version
 ```
 
-The host's control API (`/docs`) creates, resets, snapshots, restores and forks instances, and reads
-their state and call logs. It's built for test harnesses and RL loops.
+## Status and tests
 
-## Deploying
-
-```bash
-docker build -t toolsim .
-docker run -e TOOLSIM_TOKEN=change-me -p 8765:8765 toolsim     # serves envs/ via POST /envs {"file": ...}
-```
-
-Or run it directly: `toolsim serve --host 0.0.0.0 --token $TOKEN --env-dir envs/`.
-
-Security model:
-- **Authentication:** with a token set, every request needs `Authorization: Bearer <token>` (or
-  `?token=` for MCP clients that only take a URL), except `/healthz`. The host refuses to bind beyond
-  localhost without a token unless you pass `--no-auth`.
-- **Origin checks:** browser requests must come from localhost or an origin allowed with `--allow-origin`
-  (the MCP spec's DNS-rebinding guidance). Non-browser clients send no Origin and aren't affected.
-- **Files:** environment files load over the API only from `--env-dir` directories. Inline specs can't
-  reference files, `seed_file` can't leave its environment's directory, and parse errors never echo
-  file content.
-- **Limits:** instances (`--max-instances`), snapshots (the oldest are evicted), fault delays
-  (`--max-hang`), and request size.
-- **State:** everything lives in memory in one process. Snapshots are for branching runs, not
-  durability, and restarting the host clears all instances.
-
-Operations: `GET /healthz`, JSON error bodies with a reference id (the details are in the logs),
-`--log-level`. CI runs lint, the tests on Python 3.11 to 3.13, the frozen-version check, and a build.
-
-## Status
-
-- Verified with Hermes's MCP client (stdio and HTTP) and with the official MCP Python SDK client.
+- Verified with Hermes's MCP client (stdio and HTTP) and the official MCP Python SDK client.
 - **Fidelity is modeled on the public documentation of the MCP servers and APIs.** It hasn't been
-  diffed against the live services yet. Response text formats for Gmail and Calendar are approximations.
-
-## Tests
-
-```bash
-uv run pytest
-```
-
-Each example environment is tested with a scripted careful agent, which must pass, and a naive
-agent, which must fail.
+  diffed against the live services.
+- `uv run pytest` covers every service version's frozen behavior, every task family (reference
+  solves, do-nothing and stuffing don't), sloppy agents that must be caught, both clock modes, and
+  the parallel pool.

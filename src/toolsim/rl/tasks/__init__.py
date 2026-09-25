@@ -1,6 +1,6 @@
 """Generated tasks with verifiers and reference solutions, for RL at scale.
 
-    from toolsim.tasks import generate
+    from toolsim.rl import generate
     specs = generate(n=500, seed=0)          # environment specs, ready for ToolEnv(spec)
 
 Each task comes from a *family* (reply to a colleague, label every issue about X, book a slot
