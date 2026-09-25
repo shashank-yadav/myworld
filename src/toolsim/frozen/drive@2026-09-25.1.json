@@ -1,0 +1,889 @@
+{
+ "behavior_sha256": "620c59564bd9c68ae357daf8513191a93204dc4de519cbb5b04d502d4b4f3122",
+ "changelog": "Sheets (6 tools: cells, A1 ranges, formulas, grid limits) and Docs (5 tools) from the same server.",
+ "probe_calls": 34,
+ "service": "drive",
+ "tools": [
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Search for files and folders within a user's Google Drive, including shared drives",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "drive_id": {
+      "description": "Shared drive ID to search",
+      "type": "string"
+     },
+     "file_type": {
+      "description": "Restrict to a file type",
+      "enum": [
+       "doc",
+       "sheet",
+       "slides",
+       "folder",
+       "pdf"
+      ],
+      "type": "string"
+     },
+     "page_size": {
+      "default": 10,
+      "description": "Maximum number of files to return (default 10)",
+      "type": "integer"
+     },
+     "page_token": {
+      "description": "Page token for pagination",
+      "type": "string"
+     },
+     "query": {
+      "description": "Search query: plain words, or Drive query syntax (e.g. \"name contains 'budget' and trashed = false\")",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ],
+    "type": "object"
+   },
+   "name": "search_drive_files"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Retrieve the content of a Drive file (Docs, Sheets and text files are returned as text)",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "file_id": {
+      "description": "The Drive file ID",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file_id"
+    ],
+    "type": "object"
+   },
+   "name": "get_drive_file_content"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Get a temporary download URL for a Drive file, exporting Google files if needed",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "export_format": {
+      "description": "Export format for Google files (pdf, docx, xlsx, csv, pptx, txt)",
+      "type": "string"
+     },
+     "file_id": {
+      "description": "The Drive file ID",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file_id"
+    ],
+    "type": "object"
+   },
+   "name": "get_drive_file_download_url"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Create a new file in Google Drive",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "content": {
+      "description": "Text content of the file",
+      "type": "string"
+     },
+     "fileUrl": {
+      "description": "URL to fetch the file content from",
+      "type": "string"
+     },
+     "file_name": {
+      "description": "Name for the new file",
+      "type": "string"
+     },
+     "folder_id": {
+      "default": "root",
+      "description": "Parent folder ID (default: root)",
+      "type": "string"
+     },
+     "mime_type": {
+      "default": "text/plain",
+      "description": "MIME type (default: text/plain)",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file_name"
+    ],
+    "type": "object"
+   },
+   "name": "create_drive_file"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Create a new folder in Google Drive",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "folder_name": {
+      "description": "Name for the new folder",
+      "type": "string"
+     },
+     "parent_folder_id": {
+      "default": "root",
+      "description": "Parent folder ID (default: root)",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "folder_name"
+    ],
+    "type": "object"
+   },
+   "name": "create_drive_folder"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Create a Google Doc by importing text, Markdown or HTML content",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "content": {
+      "description": "Text, Markdown or HTML to convert into the Doc",
+      "type": "string"
+     },
+     "file_name": {
+      "description": "Name for the new Google Doc",
+      "type": "string"
+     },
+     "folder_id": {
+      "default": "root",
+      "description": "Parent folder ID (default: root)",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file_name",
+     "content"
+    ],
+    "type": "object"
+   },
+   "name": "import_to_google_doc"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "List files and folders in a Drive folder",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "drive_id": {
+      "description": "Shared drive ID",
+      "type": "string"
+     },
+     "folder_id": {
+      "default": "root",
+      "description": "Folder ID to list (default: root)",
+      "type": "string"
+     },
+     "page_size": {
+      "default": 100,
+      "description": "Maximum number of items (default 100)",
+      "type": "integer"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "name": "list_drive_items"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Make a copy of a Drive file",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "file_id": {
+      "description": "The file to copy",
+      "type": "string"
+     },
+     "new_name": {
+      "description": "Name for the copy (default: 'Copy of <name>')",
+      "type": "string"
+     },
+     "parent_folder_id": {
+      "description": "Folder for the copy (default: same folder, or root)",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file_id"
+    ],
+    "type": "object"
+   },
+   "name": "copy_drive_file"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Update a Drive file's metadata, location, trash state, or content",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "add_parents": {
+      "description": "Comma-separated folder IDs to add as parents (move)",
+      "type": "string"
+     },
+     "content": {
+      "description": "Replace the file's text content",
+      "type": "string"
+     },
+     "description": {
+      "description": "New description",
+      "type": "string"
+     },
+     "file_id": {
+      "description": "The file to update",
+      "type": "string"
+     },
+     "name": {
+      "description": "New name",
+      "type": "string"
+     },
+     "remove_parents": {
+      "description": "Comma-separated folder IDs to remove as parents",
+      "type": "string"
+     },
+     "starred": {
+      "description": "Star or unstar the file",
+      "type": "boolean"
+     },
+     "trashed": {
+      "description": "Move to or restore from trash",
+      "type": "boolean"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file_id"
+    ],
+    "type": "object"
+   },
+   "name": "update_drive_file"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Get the shareable link and current sharing settings for a file",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "file_id": {
+      "description": "The Drive file ID",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file_id"
+    ],
+    "type": "object"
+   },
+   "name": "get_drive_shareable_link"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Grant, update, or revoke someone's access to a file, or transfer ownership",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "action": {
+      "description": "What to do",
+      "enum": [
+       "grant",
+       "update",
+       "revoke",
+       "transfer_owner"
+      ],
+      "type": "string"
+     },
+     "email_message": {
+      "description": "Message to include in the notification",
+      "type": "string"
+     },
+     "file_id": {
+      "description": "The Drive file ID",
+      "type": "string"
+     },
+     "role": {
+      "default": "reader",
+      "description": "Role to grant or update to",
+      "enum": [
+       "reader",
+       "commenter",
+       "writer"
+      ],
+      "type": "string"
+     },
+     "send_notification": {
+      "default": true,
+      "description": "Email the person about the change",
+      "type": "boolean"
+     },
+     "share_with": {
+      "description": "Email address of the person (or group) to change access for",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file_id",
+     "action"
+    ],
+    "type": "object"
+   },
+   "name": "manage_drive_access"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Set a file's general (link) access",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "file_id": {
+      "description": "The Drive file ID",
+      "type": "string"
+     },
+     "link_sharing": {
+      "description": "Who can open the file with its link",
+      "enum": [
+       "restricted",
+       "domain",
+       "anyone_with_link"
+      ],
+      "type": "string"
+     },
+     "role": {
+      "default": "reader",
+      "description": "Role for people using the link",
+      "enum": [
+       "reader",
+       "commenter",
+       "writer"
+      ],
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "file_id",
+     "link_sharing"
+    ],
+    "type": "object"
+   },
+   "name": "set_drive_file_permissions"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Lists spreadsheets from Google Drive that the user has access to",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "max_results": {
+      "default": 25,
+      "description": "Maximum number of spreadsheets to return (default 25)",
+      "type": "integer"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "type": "object"
+   },
+   "name": "list_spreadsheets"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Gets information about a specific spreadsheet including its sheets",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "spreadsheet_id": {
+      "description": "The ID of the spreadsheet",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "spreadsheet_id"
+    ],
+    "type": "object"
+   },
+   "name": "get_spreadsheet_info"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Reads values from a specific range in a Google Sheet",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "range_name": {
+      "default": "A1:Z1000",
+      "description": "The range to read (e.g., 'Sheet1!A1:D10', 'A1:D10')",
+      "type": "string"
+     },
+     "spreadsheet_id": {
+      "description": "The ID of the spreadsheet",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "spreadsheet_id"
+    ],
+    "type": "object"
+   },
+   "name": "read_sheet_values"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Modifies values in a specific range of a Google Sheet - can write, update, or clear values",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "clear_values": {
+      "default": false,
+      "description": "If true, clears the range instead of writing values",
+      "type": "boolean"
+     },
+     "range_name": {
+      "description": "The range to modify (e.g., 'Sheet1!A1:D10', 'A1:D10')",
+      "type": "string"
+     },
+     "spreadsheet_id": {
+      "description": "The ID of the spreadsheet",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     },
+     "value_input_option": {
+      "default": "USER_ENTERED",
+      "description": "How to interpret input values",
+      "enum": [
+       "RAW",
+       "USER_ENTERED"
+      ],
+      "type": "string"
+     },
+     "values": {
+      "anyOf": [
+       {},
+       {
+        "type": "string"
+       }
+      ],
+      "description": "2D array of values to write/update, e.g. [[\"a\", \"1\"], [\"b\", \"=A1*2\"]] (JSON string accepted). Required unless clear_values is true"
+     }
+    },
+    "required": [
+     "spreadsheet_id",
+     "range_name"
+    ],
+    "type": "object"
+   },
+   "name": "modify_sheet_values"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Creates a new Google Spreadsheet",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "sheet_names": {
+      "description": "List of sheet names to create (default: one 'Sheet1')",
+      "items": {
+       "type": "string"
+      },
+      "type": "array"
+     },
+     "title": {
+      "description": "The title of the new spreadsheet",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "title"
+    ],
+    "type": "object"
+   },
+   "name": "create_spreadsheet"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Creates a new sheet within an existing spreadsheet",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "sheet_name": {
+      "description": "The name of the new sheet",
+      "type": "string"
+     },
+     "spreadsheet_id": {
+      "description": "The ID of the spreadsheet",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "spreadsheet_id",
+     "sheet_name"
+    ],
+    "type": "object"
+   },
+   "name": "create_sheet"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Searches for Google Docs by name using Drive API",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "page_size": {
+      "default": 10,
+      "description": "Maximum number of results (default 10)",
+      "type": "integer"
+     },
+     "query": {
+      "description": "Text to search for in document names",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ],
+    "type": "object"
+   },
+   "name": "search_docs"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Retrieves content of a Google Doc as plain text",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "document_id": {
+      "description": "The ID of the Google Doc",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "document_id"
+    ],
+    "type": "object"
+   },
+   "name": "get_doc_content"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Creates a new Google Doc and optionally inserts initial content",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "content": {
+      "default": "",
+      "description": "Initial text content",
+      "type": "string"
+     },
+     "title": {
+      "description": "Title of the new document",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "title"
+    ],
+    "type": "object"
+   },
+   "name": "create_doc"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Modifies text in a Google Doc - can insert/replace text and/or apply formatting",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "bold": {
+      "description": "Make the text bold",
+      "type": "boolean"
+     },
+     "document_id": {
+      "description": "The ID of the Google Doc",
+      "type": "string"
+     },
+     "end_index": {
+      "description": "End index (exclusive) of text to replace; omit to insert at start_index",
+      "type": "integer"
+     },
+     "font_family": {
+      "description": "Font family name",
+      "type": "string"
+     },
+     "font_size": {
+      "description": "Font size in points",
+      "type": "integer"
+     },
+     "italic": {
+      "description": "Make the text italic",
+      "type": "boolean"
+     },
+     "start_index": {
+      "description": "Start index (1-based, as in the Docs API; 1 is the start of the body)",
+      "type": "integer"
+     },
+     "text": {
+      "description": "Text to insert, or to replace the range with",
+      "type": "string"
+     },
+     "underline": {
+      "description": "Underline the text",
+      "type": "boolean"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "document_id",
+     "start_index"
+    ],
+    "type": "object"
+   },
+   "name": "modify_doc_text"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Finds and replaces text throughout a Google Doc",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "document_id": {
+      "description": "The ID of the Google Doc",
+      "type": "string"
+     },
+     "find_text": {
+      "description": "Text to find",
+      "type": "string"
+     },
+     "match_case": {
+      "default": false,
+      "description": "Whether to match case",
+      "type": "boolean"
+     },
+     "replace_text": {
+      "description": "Replacement text",
+      "type": "string"
+     },
+     "user_google_email": {
+      "description": "The user's Google email address (optional in single-user mode)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "document_id",
+     "find_text",
+     "replace_text"
+    ],
+    "type": "object"
+   },
+   "name": "find_and_replace_doc"
+  }
+ ],
+ "version": "2026-09-25.1"
+}

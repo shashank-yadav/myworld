@@ -26,6 +26,8 @@ from typing import Annotated, Any, Literal
 from ..core.instance import Instance, Service
 from ..core.tools import ToolError, action, tool
 
+V1 = "2026-09-25.1"
+
 SYSTEM_LABELS = ["INBOX", "SENT", "DRAFT", "SPAM", "TRASH", "UNREAD", "STARRED", "IMPORTANT",
                  "CATEGORY_PERSONAL", "CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS", "CATEGORY_UPDATES", "CATEGORY_FORUMS"]
 
@@ -55,7 +57,8 @@ class Gmail(Service):
     title = "Gmail"
     description = "Simulated Gmail mailbox. Behaves like the Gmail MCP server; nothing is really sent."
 
-    versions = {"2026-09-25": "Initial release: 19 tools modeled on GongRzhe/Gmail-MCP-Server."}
+    versions = {"2026-09-25": "Initial release: 19 tools modeled on GongRzhe/Gmail-MCP-Server.",
+                V1: "Bounces for unknown/typo'd recipients, out-of-office and colleague auto-replies, daily send quota."}
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -74,6 +77,11 @@ class Gmail(Service):
         c("list_filters", {})
         c("delete_email", {"messageId": ids[-1]})
         c("search_emails", {"query": "in:sent"})
+        if ctx.at_least(V1):
+            c("send_email", {"to": ["jhon@acme.com"], "subject": "Typo", "body": "Hi"})
+            c("send_email", {"to": ["priya@acme.co"], "subject": "Typo domain", "body": "Hi"})
+            ctx.advance(600)
+            c("search_emails", {"query": "from:mailer-daemon"})
 
     def default_seed(self) -> dict[str, Any]:
         return {
@@ -108,6 +116,23 @@ class Gmail(Service):
             user = box.get("user") or {"email": "alex@acme.com", "name": "Alex Rivera"}
             state["mailboxes"][user["email"].lower()] = _new_mailbox(ctx, box, user)
         state["default"] = next(iter(state["mailboxes"]))
+        # who exists: every mailbox owner, everyone in the seeded mail, and an explicit directory
+        known = set(state["mailboxes"]) | {_addr(a).lower() for a in seed.get("directory", [])}
+        names = {e: b["user"].get("name", e) for e, b in state["mailboxes"].items()}
+        for box in [primary, *seed.get("mailboxes", [])]:
+            for e in box.get("emails", []):
+                for a in [e.get("from", ""), *_list(e.get("to")), *_list(e.get("cc"))]:
+                    if a:
+                        known.add(_addr(a).lower())
+                        name = parseaddr(a)[0]
+                        if name:
+                            names.setdefault(_addr(a).lower(), name)
+        state["_directory"] = sorted(known)
+        state["_names"] = names
+        state["_domains"] = sorted({a.split("@")[1] for a in state["mailboxes"]} | set(seed.get("domains", [])))
+        state["_auto_replies"] = list(seed.get("auto_replies", []))
+        state["_daily_send_limit"] = int(seed.get("daily_send_limit", 2000))
+        state["_ooo_sent"] = []
         return state
 
     def default_actor(self, state: dict[str, Any]) -> str:
@@ -265,6 +290,94 @@ def _addr(s: str) -> str:
     return parseaddr(s)[1].lower() or s.lower()
 
 
+# -- delivery realism (2026-09-25.1) ------------------------------------------------------
+
+COMMON_DOMAINS = ["gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "yahoo.com", "icloud.com"]
+
+
+def _edit_distance(a: str, b: str) -> int:
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def _bounce_reason(state: dict[str, Any], rcpt: str) -> str | None:
+    """Why a recipient is undeliverable, or None. Company addresses must exist; domains one or two
+    keystrokes away from a real one (acme.co, gmial.com) don't resolve."""
+    rcpt = rcpt.lower()
+    domain = rcpt.rsplit("@", 1)[-1]
+    if domain in state["_domains"]:
+        if rcpt not in state["_directory"]:
+            return (f"Address not found\n\nYour message wasn't delivered to {rcpt} because the address couldn't "
+                    "be found, or is unable to receive mail.")
+        return None
+    for real in state["_domains"] + COMMON_DOMAINS:
+        if domain != real and _edit_distance(domain, real) <= 2:
+            return (f"Address not found\n\nYour message wasn't delivered to {rcpt} because the domain {domain} "
+                    "couldn't be found. Check for typos or unnecessary spaces and try again.")
+    return None
+
+
+def _check_quota(ctx: Instance, box: dict[str, Any], recipients: int) -> None:
+    today = ctx.now().date()
+    sent = sum(len(m["to"]) + len(m["cc"]) + len(m["bcc"]) for m in box["messages"].values() if "SENT" in m["labelIds"]
+               and dt.datetime.fromtimestamp(int(m["internalDate"]) / 1000, dt.timezone.utc).date() == today)
+    if sent + recipients > ctx.state["_daily_send_limit"]:
+        raise ToolError({"error": {"code": 429, "message": "Daily user sending limit exceeded. Try again after "
+                                   "the limit resets.", "status": "RESOURCE_EXHAUSTED"}}, status=429)
+
+
+def _matches_rule(rule: dict[str, Any], msg: dict[str, Any], rcpt: str) -> bool:
+    if _addr(rule.get("person", "")) != rcpt:
+        return False
+    w = rule.get("match") or {}
+    if w.get("from") and w["from"].lower() not in msg["from"].lower():
+        return False
+    if w.get("subject~") and w["subject~"].lower() not in msg["subject"].lower():
+        return False
+    return not (w.get("body~") and w["body~"].lower() not in msg["body"].lower())
+
+
+def _after_send(ctx: Instance, msg: dict[str, Any]) -> None:
+    """What the world does after a send: bounces, out-of-office replies, colleagues answering."""
+    state, sender = ctx.state, ctx.actor
+    for rcpt in dict.fromkeys(_addr(a).lower() for a in [*msg["to"], *msg["cc"], *msg["bcc"]]):
+        reason = _bounce_reason(state, rcpt)
+        if reason:
+            ctx.schedule(ctx.rng.randint(20, 120), "deliver_reply", {
+                "to": sender, "sender": "Mail Delivery Subsystem <mailer-daemon@googlemail.com>",
+                "subject": "Delivery Status Notification (Failure)", "body": reason,
+                "in_reply_to": msg["messageId"]}, reason=f"bounce for {rcpt}")
+            continue
+        for rule in state["_auto_replies"]:
+            if not _matches_rule(rule, msg, rcpt):
+                continue
+            ooo = rule.get("out_of_office")
+            key = f"{rcpt}->{sender}"
+            if ooo and key in state["_ooo_sent"]:
+                continue  # Gmail's vacation responder answers each sender once
+            if ooo:
+                state["_ooo_sent"].append(key)
+            name = rule.get("name") or state["_names"].get(rcpt) or rcpt.split("@")[0].replace(".", " ").title()
+            ctx.schedule(_delay(rule.get("delay", "+30s" if ooo else "+5m")), "deliver_reply", {
+                "to": sender, "sender": f"{name} <{rcpt}>",
+                "subject": ("Automatic reply: " if ooo else "Re: ") + msg["subject"].removeprefix("Re: "),
+                "body": ooo or rule.get("reply", ""), "in_reply_to": msg["messageId"]},
+                reason=f"{'out-of-office' if ooo else 'reply'} from {rcpt}")
+            break
+
+
+def _delay(v: Any) -> float:
+    m = re.fullmatch(r"\+?(\d+(?:\.\d+)?)([smhd]?)", str(v).strip())
+    if not m:
+        raise ToolError({"error": {"code": 400, "message": f"invalid delay {v!r}"}})
+    return float(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)]
+
+
 # -- search -------------------------------------------------------------------------------
 
 _UNITS = {"d": 1, "m": 30, "y": 365}
@@ -357,6 +470,8 @@ def send_email(ctx: Instance,
     s = _mb(ctx)
     if not to:
         raise _invalid("Recipient address required")
+    if ctx.at_least(V1):
+        _check_quota(ctx, s, len(to) + len(cc or []) + len(bcc or []))
     for a in [*to, *(cc or []), *(bcc or [])]:
         if "@" not in _addr(a):
             raise _invalid(f"Invalid To header: {a}")
@@ -370,6 +485,8 @@ def send_email(ctx: Instance,
     if user["email"].lower() in {_addr(a) for a in [*to, *(cc or [])]}:
         msg["labelIds"] += ["INBOX", "UNREAD"]
     _deliver(ctx, msg, s)  # colleagues in this world actually receive it
+    if ctx.at_least(V1):
+        _after_send(ctx, msg)
     return f"Email sent successfully with ID: {msg['id']}"
 
 
@@ -693,4 +810,17 @@ def act_set_search_lag(ctx: Instance, seconds: int, mailbox: str | None = None) 
         box["_index_lag_since"] = int(ctx.now().timestamp() * 1000)  # mail already there stays searchable
 
 
-Gmail.actions = [act_deliver_email, act_set_search_lag]
+@action("deliver_reply")
+def act_deliver_reply(ctx: Instance, to: str, sender: str, subject: str, body: str, in_reply_to: str | None = None) -> str:
+    """A reply arrives, threaded with the message it answers (bounces and auto-replies use this)."""
+    box = _box(ctx, to)
+    thread = next((m["threadId"] for m in box["messages"].values() if in_reply_to and m["messageId"] == in_reply_to), None)
+    m = _store(ctx, box, sender=sender, to=[to], cc=[], bcc=[], subject=subject, body=body,
+               labels=["INBOX", "UNREAD"], date=ctx.now(), thread_id=thread)
+    _apply_filters(box, m, ctx)
+    if sender.lower().split("<")[-1].rstrip(">") not in ctx.state["_directory"]:
+        ctx.state["_directory"].append(_addr(sender).lower())
+    return m["id"]
+
+
+Gmail.actions = [act_deliver_email, act_set_search_lag, act_deliver_reply]

@@ -124,8 +124,11 @@ def test_github_files_and_blob_shas():
     git = subprocess.run(["git", "hash-object", "--stdin"], input=b"# Acme API\n\nPayments and billing API.\n",
                          capture_output=True).stdout.decode().strip()
     assert f["sha"] == git, "blob SHAs match real git"
-    assert "wasn't supplied" in call("create_or_update_file", path="README.md", content="x", message="m", branch="main", **O).text
-    assert "does not match" in call("create_or_update_file", path="README.md", content="x", message="m", branch="main",
+    assert "through a pull request" in call("create_or_update_file", path="README.md", content="x", message="m",
+                                            branch="main", sha=f["sha"], **O).text, "main is protected"
+    call("create_branch", branch="dev", **O)
+    assert "wasn't supplied" in call("create_or_update_file", path="README.md", content="x", message="m", branch="dev", **O).text
+    assert "does not match" in call("create_or_update_file", path="README.md", content="x", message="m", branch="dev",
                                     sha="0" * 40, **O).text
     listing = json.loads(call("get_file_contents", path="", **O).text)
     assert [e["name"] for e in listing][:2] == ["src", "tests"]
@@ -151,10 +154,9 @@ def test_github_pull_request_lifecycle():
 
 def test_github_conflicts_and_required_checks():
     i, call = svc("github")
-    # change the same file on main: the PR now conflicts
-    f = json.loads(call("get_file_contents", path="src/retry.py", **O).text)
-    call("create_or_update_file", path="src/retry.py", content="# rewritten\n", message="rewrite", branch="main",
-         sha=f["sha"], **O)
+    # a teammate changes the same file on main: the PR now conflicts
+    i.apply_action("push_commit", {"repo": "acme/api", "branch": "main", "files": {"src/retry.py": "# rewritten\n"},
+                                   "author": "priya-shah"})
     assert json.loads(call("get_pull_request", pull_number=4, **O).text)["mergeable_state"] == "dirty"
     assert "not mergeable" in call("merge_pull_request", pull_number=4, **O).text
     # a PR whose required check never ran is blocked
@@ -163,7 +165,9 @@ def test_github_conflicts_and_required_checks():
     pr = json.loads(call("create_pull_request", title="Docs", head="docs", base="main", **O).text)
     assert pr["mergeable_state"] == "blocked"
     blocked = json.loads(call("merge_pull_request", pull_number=pr["number"], **O).text)
-    assert blocked["message"] == 'Required status check "ci" is expected.' and blocked["status"] == "405"
+    assert blocked["message"] == 'Required status check "ci" is in progress.' and blocked["status"] == "405"
+    i.advance(300)  # CI finishes
+    assert json.loads(call("get_pull_request_status", pull_number=pr["number"], **O).text)["state"] == "success"
 
 
 def test_github_issues_search_and_reviews():

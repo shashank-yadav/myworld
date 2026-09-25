@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from typing import Any, ClassVar, Iterator
 
 from .faults import Fault, TransportFault, parse_faults
-from .tools import Action, Tool, ToolError, validate_args
+from .tools import Action, Tool, ToolError, validate_args, version_key
 
 log = logging.getLogger("toolsim")
 
@@ -54,7 +54,7 @@ class Service:
 
     @classmethod
     def latest_version(cls) -> str:
-        return max(cls.versions)
+        return max(cls.versions, key=version_key)
 
     def resolve_version(self, version: str | None) -> str:
         if version in (None, "", "latest"):
@@ -180,6 +180,7 @@ class Instance:
             self.counters: dict[str, int] = {}
             self.calls: list[dict[str, Any]] = []
             self.events: list[dict[str, Any]] = []  # world events applied to this instance
+            self.pending: list[dict[str, Any]] = []  # scheduled world actions (see schedule())
             self.faults = parse_faults(self.fault_specs)
             try:
                 self.state = self.service.initial_state(copy.deepcopy(self.seed), self)
@@ -193,7 +194,7 @@ class Instance:
         with self.lock:
             return copy.deepcopy({
                 "state": self.state, "clock": self.clock.isoformat(), "seq": self._clock.seq, "counters": self.counters,
-                "rng": self.rng.getstate(), "calls": self.calls, "events": self.events,
+                "rng": self.rng.getstate(), "calls": self.calls, "events": self.events, "pending": self.pending,
                 "faults": [f.to_dict() for f in self.faults],
             })
 
@@ -208,6 +209,7 @@ class Instance:
             self.rng.setstate((rng[0], tuple(rng[1]), rng[2]) if isinstance(rng, list) else rng)
             self.calls = snap["calls"]
             self.events = snap.get("events", [])
+            self.pending = snap.get("pending", [])
             self.faults = [Fault(**f) for f in snap["faults"]]
 
     def set_faults(self, specs: list[dict[str, Any]]) -> None:
@@ -229,6 +231,39 @@ class Instance:
 
     def now(self) -> dt.datetime:
         return self.clock
+
+    def at_least(self, version: str) -> bool:
+        """Gate behavior introduced in ``version`` so older versions keep behaving as frozen."""
+        return version_key(self.version) >= version_key(version)
+
+    def schedule(self, delay_s: float, action_name: str, params: dict[str, Any] | None = None,
+                 as_: str | None = None, reason: str = "") -> None:
+        """Make a world action happen later (a bounce, a colleague's reply, CI finishing). Runs when
+        virtual time passes the due time: on the next call to any instance of the environment, or when
+        time is advanced."""
+        due = self.clock + dt.timedelta(seconds=delay_s)
+        self.pending.append({"due": due.isoformat(), "action": action_name, "params": copy.deepcopy(params or {}),
+                             "as": as_, "reason": reason, "n": self.next("_pending")})
+
+    def run_due(self) -> int:
+        """Apply scheduled actions that are due, in due-time order. Returns how many ran."""
+        ran = 0
+        while True:
+            due = [p for p in self.pending if dt.datetime.fromisoformat(p["due"]) <= self.clock]
+            if not due:
+                return ran
+            item = min(due, key=lambda p: (p["due"], p["n"]))
+            self.pending.remove(item)
+            now = self.clock
+            self.clock = dt.datetime.fromisoformat(item["due"])  # it happened when it was due, not now
+            try:
+                self.apply_action(item["action"], item["params"], as_=item["as"],
+                                  source=f"scheduled: {item['reason'] or item['action']}", advance=False)
+            except ValueError:
+                log.warning("scheduled %s.%s failed", self.service.name, item["action"], exc_info=True)
+            finally:
+                self.clock = max(now, self.clock)
+            ran += 1
 
     def advance(self, seconds: float) -> None:
         self.clock += dt.timedelta(seconds=seconds)
@@ -275,6 +310,8 @@ class Instance:
                 return CallResult(f"Error: {e}", True)
             if self.hooks:
                 self.hooks.before_call(self, name, args, agent)
+            else:
+                self.run_due()
             with self._acting(actor):
                 result = self._call(name, args, agent)
             if self.hooks and self.calls:
@@ -282,14 +319,15 @@ class Instance:
             return result
 
     def apply_action(self, name: str, params: dict[str, Any] | None = None, *, as_: str | None = None,
-                     source: str = "event") -> Any:
+                     source: str = "event", advance: bool = True) -> Any:
         """Make the world change (not an agent call). Raises ValueError on bad actions or params."""
         act = next((a for a in self.service.actions if a.name == name), None)
         if act is None:
             raise ValueError(f"{self.service.name} has no action {name!r}; "
                              f"available: {', '.join(a.name for a in self.service.actions) or 'none'}")
         with self.lock:
-            self.advance(1)  # world events take a moment too, and so are strictly ordered in time
+            if advance:
+                self.advance(1)  # world events take a moment too, and so are strictly ordered in time
             actor = self.resolve_actor(as_)
             with self._acting(actor):
                 try:

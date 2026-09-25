@@ -389,6 +389,8 @@ class EnvRun:
                                                   source=f"{ev.get('name') or 'event ' + str(n + 1)} ({source})")
 
     def _due_by_time(self) -> None:
+        for inst in self.instances.values():
+            inst.run_due()
         for n, ev in enumerate(self.env.events):
             if n in self.fired:
                 continue

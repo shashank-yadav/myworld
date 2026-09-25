@@ -2,6 +2,24 @@
 
 Service behavior is versioned separately by date (`toolsim versions`); this file tracks the package.
 
+## Unreleased
+
+Realism gaps closed as new service versions (`2026-09-25.1`; the `2026-09-25` versions are unchanged):
+- **Gmail:** bounces for unknown addresses and typo'd domains, out-of-office and rule-based auto-replies
+  (once per sender), daily send quota (429).
+- **Calendar:** recurring events expand into instances (RRULE DAILY/WEEKLY/MONTHLY/YEARLY, INTERVAL, COUNT,
+  UNTIL, BYDAY incl. -1FR, BYMONTHDAY, EXDATE; wall-clock across DST), instance ids, `modificationScope`
+  (thisEventOnly / thisAndFollowing / all), per-instance deletes and RSVPs, colleagues who answer invites.
+- **Slack:** DMs by posting to a user ID, channel IDs required outside `slack_post_message`, responders
+  that answer DMs and real `<@U…>` mentions.
+- **GitHub:** protected branches reject direct pushes, required approving reviews (stale ones dismissed),
+  closing keywords close issues on merge, simulated CI on every push (pending, then pass/fail).
+- **Jira:** 6 agile tools (boards, sprints, sprint issues, create/update sprint), `sprint` in JQL with
+  `openSprints()` / `closedSprints()` / `futureSprints()`, Jira's sprint rules.
+- **Drive:** Sheets (cells, A1 ranges, USER_ENTERED vs RAW, formulas, grid limits) and Docs tools.
+- Core: `ctx.schedule` for delayed world reactions (applied at their due time, included in snapshots);
+  `@tool(since=…)` compares same-day revisions correctly.
+
 ## 0.2.0 (2026-09-25)
 
 Production hardening:

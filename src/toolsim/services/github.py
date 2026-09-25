@@ -18,11 +18,19 @@ Seed format::
         branches:                           # branched from the default branch, with changes
           fix/flaky-retry: {files: {src/retry.py: "..."}, author: john-park}
         labels: [bug, p1, question]
-        protected: {main: {required_checks: [ci]}}
+        protected: {main: {required_checks: [ci], required_approvals: 1, dismiss_stale_reviews: true}}
         statuses: {fix/flaky-retry: [{context: ci, state: success}]}
+        ci: {contexts: [ci], duration: 4m, fail_if: [{path: tests/, "content~": "assert False"}], flaky: 0.0}
         issues: [{title: Retries hammer the API, labels: [bug], author: john-park,
                   comments: [{author: priya-shah, body: Seeing this too}]}]
         pulls: [{title: Fix flaky retry, head: fix/flaky-retry, base: main, author: john-park}]
+
+From 2026-09-25.1, like GitHub: protected branches reject direct pushes (changes go through a
+pull request), ``required_approvals`` blocks merging until enough reviewers approve the current
+head (with ``dismiss_stale_reviews``), merging into the default branch closes issues named with
+closing keywords ("Fixes #12"), and repos with ``ci`` run it on every push: statuses go pending,
+then pass or fail ``duration`` later (fail_if rules match files in the pushed tree; ``flaky`` is
+a seeded failure probability).
 """
 
 from __future__ import annotations
@@ -30,12 +38,15 @@ from __future__ import annotations
 import base64
 import difflib
 import hashlib
+import re
 from typing import Annotated, Any, Literal
 
 from ..core.instance import Instance, Service
 from ..core.tools import ToolError, action, tool
 
 API = "https://api.github.com"
+V1 = "2026-09-25.1"
+CLOSING = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)\b", re.I)
 
 
 def _err(status: int, message: str, **extra: Any) -> ToolError:
@@ -61,7 +72,9 @@ class GitHub(Service):
     title = "GitHub"
     description = "Simulated GitHub. Behaves like the GitHub MCP server; nothing is really pushed."
 
-    versions = {"2026-09-25": "Initial release: 26 tools modeled on the reference GitHub MCP server."}
+    versions = {"2026-09-25": "Initial release: 26 tools modeled on the reference GitHub MCP server.",
+                V1: "Protected branches reject direct pushes, required approving reviews, closing keywords close "
+                    "issues on merge, simulated CI runs on every push."}
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -86,6 +99,25 @@ class GitHub(Service):
         c("search_code", {"q": "backoff repo:acme/api"})
         c("add_issue_comment", {**o, "issue_number": 1, "body": "Fixed by #4"})
         c("update_issue", {**o, "issue_number": 1, "state": "closed"})
+        if ctx.at_least(V1):
+            c("push_files", {**o, "branch": "main", "files": [{"path": "x.md", "content": "x"}], "message": "direct"})
+            c("create_branch", {**o, "branch": "fix/keys"})
+            c("push_files", {**o, "branch": "fix/keys", "message": "Rotate keys",
+                             "files": [{"path": "docs/keys.md", "content": "How to rotate keys"}]})
+            pr = c("create_pull_request", {**o, "title": "Key rotation docs", "head": "fix/keys", "base": "main",
+                                           "body": "Closes #2"}).data["number"]
+            c("get_pull_request_status", {**o, "pull_number": pr})
+            ctx.advance(300)
+            c("get_pull_request_status", {**o, "pull_number": pr})
+            ctx.state["viewer"] = "john-park"
+            c("create_pull_request_review", {**o, "pull_number": pr, "body": "ok", "event": "APPROVE"})
+            ctx.state["viewer"] = "alex-rivera"
+            c("merge_pull_request", {**o, "pull_number": pr, "merge_method": "squash"})
+            c("get_issue", {**o, "issue_number": 2})
+            c("push_files", {**o, "branch": "fix/flaky-retry", "message": "wip",
+                             "files": [{"path": "tests/test_x.py", "content": "def test_x():\n    assert False\n"}]})
+            ctx.advance(300)
+            c("get_pull_request_status", {**o, "pull_number": 4})
 
     def default_seed(self) -> dict[str, Any]:
         retry_v1 = ("import random, time\n\n\ndef backoff(attempt: int) -> float:\n"
@@ -105,6 +137,7 @@ class GitHub(Service):
                                                  "message": "Seed retry jitter from a dedicated RNG"}},
                 "labels": ["bug", "p1", "question", "enhancement"],
                 "protected": {"main": {"required_checks": ["ci"]}},
+                "ci": {"contexts": ["ci"], "duration": "4m", "fail_if": [{"path": "tests/", "content~": "assert False"}]},
                 "statuses": {"fix/flaky-retry": [{"context": "ci", "state": "success", "description": "142 tests passed"}]},
                 "issues": [
                     {"title": "Retries hammer the API during outages", "body": "Backoff has no cap on jitter.",
@@ -144,6 +177,10 @@ class GitHub(Service):
                 repo["branches"][bname] = _commit(ctx, state, repo, tree, [base], b.get("message", f"Update {bname}"),
                                                   b.get("author", state["viewer"]))
             repo["protected"] = r.get("protected") or {}
+            if ctx.at_least(V1) and r.get("ci"):
+                repo["ci"] = {"contexts": list(r["ci"].get("contexts") or ["ci"]),
+                              "duration": _delay(r["ci"].get("duration", "4m")),
+                              "fail_if": list(r["ci"].get("fail_if") or []), "flaky": float(r["ci"].get("flaky", 0))}
             for ref, sts in (r.get("statuses") or {}).items():
                 sha = repo["branches"].get(ref, ref)
                 repo["statuses"][sha] = [{"context": s["context"], "state": s["state"],
@@ -168,6 +205,8 @@ class GitHub(Service):
                         repo["issues"][pr["number"]].update(state="closed", closed_at=ctx.now().isoformat())
                     for c in x.get("comments", []):
                         _comment(ctx, repo, pr["number"], c.get("author", state["viewer"]), c["body"])
+        if ctx.at_least(V1):
+            state["_v1"] = True
         return state
 
     actor_key = "viewer"
@@ -192,6 +231,66 @@ class GitHub(Service):
 
 
 # -- model helpers -----------------------------------------------------------------------
+
+def _delay(v: Any) -> float:
+    m = re.fullmatch(r"\+?(\d+(?:\.\d+)?)([smhd]?)", str(v).strip())
+    if not m:
+        raise ValueError(f"invalid duration {v!r} (e.g. 90s, 4m)")
+    return float(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)]
+
+
+def _check_push(state: dict[str, Any], r: dict[str, Any], branch: str) -> None:
+    """Protected branches only change through pull requests (2026-09-25.1)."""
+    rules = r["protected"].get(branch)
+    if state.get("_v1") and rules is not None and not rules.get("allow_direct_push"):
+        raise _err(409, "Repository rule violations found\n\nChanges must be made through a pull request.\n\n")
+
+
+def _pushed(ctx: Instance, r: dict[str, Any], sha: str) -> None:
+    """A commit landed on a branch: CI starts on it and reports back later (2026-09-25.1)."""
+    ci = r.get("ci")
+    if not ctx.state.get("_v1") or not ci:
+        return
+    tree = r["commits"][sha]["tree"]
+    blobs = ctx.state["blobs"]
+    reason = next((f"{p}: matched {rule.get('content~')!r}" for rule in ci["fail_if"] for p, b in sorted(tree.items())
+                   if p.startswith(rule.get("path", "")) and (rule.get("content~") or "") in blobs[b]), None)
+    for context in ci["contexts"]:
+        failed = reason or (ci["flaky"] and ctx.rng.random() < ci["flaky"] and "flaky test: test_timeout_under_load")
+        r["statuses"][sha] = [x for x in r["statuses"].get(sha, []) if x["context"] != context] + [
+            {"context": context, "state": "pending", "description": "In progress"}]
+        ctx.schedule(ci["duration"], "set_status", {
+            "repo": r["full_name"], "ref": sha, "context": context, "state": "failure" if failed else "success",
+            "description": f"Failed: {failed}" if failed else "All checks have passed"},
+            reason=f"{context} finishes on {sha[:7]}")
+
+
+def _approvals(r: dict[str, Any], pr: dict[str, Any], head_sha: str) -> tuple[int, bool]:
+    """(approvals that count, whether changes are requested): each reviewer's latest verdict."""
+    rules = r["protected"].get(pr["base"], {})
+    author = r["issues"][pr["number"]]["user"]
+    latest: dict[str, dict[str, Any]] = {}
+    for rv in r["reviews"][pr["number"]]:
+        if rv["state"] in ("APPROVED", "CHANGES_REQUESTED", "DISMISSED") and rv["user"]["login"] != author:
+            latest[rv["user"]["login"]] = rv
+    ok = sum(rv["state"] == "APPROVED" and (not rules.get("dismiss_stale_reviews") or rv["commit_id"] == head_sha)
+             for rv in latest.values())
+    return ok, any(rv["state"] == "CHANGES_REQUESTED" for rv in latest.values())
+
+
+def _close_referenced(ctx: Instance, r: dict[str, Any], pr: dict[str, Any], extra: str) -> list[int]:
+    """Merging into the default branch closes issues the PR says it fixes (2026-09-25.1)."""
+    if not ctx.state.get("_v1") or pr["base"] != r["default_branch"]:
+        return []
+    i = r["issues"][pr["number"]]
+    closed = []
+    for m in CLOSING.finditer(" ".join(filter(None, [i["title"], i["body"], extra]))):
+        target = r["issues"].get(int(m.group(1)))
+        if target and not target["is_pull"] and target["state"] == "open":
+            target.update(state="closed", state_reason="completed", closed_at=_iso(ctx), updated_at=_iso(ctx))
+            closed.append(target["number"])
+    return closed
+
 
 def _iso(ctx: Instance) -> str:
     return ctx.now().replace(microsecond=0).isoformat().replace("+00:00", "Z")
@@ -389,18 +488,27 @@ def _pr_state(state: dict[str, Any], r: dict[str, Any], pr: dict[str, Any]) -> d
     required = r["protected"].get(pr["base"], {}).get("required_checks", [])
     statuses = {s["context"]: s["state"] for s in r["statuses"].get(head_sha, [])}
     failing = [c for c in required if statuses.get(c) != "success"]
+    need = int(r["protected"].get(pr["base"], {}).get("required_approvals", 0)) if state.get("_v1") else 0
+    approved, changes_requested = _approvals(r, pr, head_sha) if need else (0, False)
+    review_block = None
+    if changes_requested:
+        review_block = "Changes were requested by a reviewer. Address them before merging."
+    elif approved < need:
+        review_block = (f"At least {need} approving review{'s are' if need > 1 else ' is'} required by reviewers "
+                        "with write access.")
     if conflicts:
         ms = "dirty"
     elif pr["draft"]:
         ms = "draft"
-    elif failing:
+    elif failing or review_block:
         ms = "blocked"
     elif mb != base_sha:
         ms = "behind"
     else:
         ms = "clean"
     return {"mergeable": not conflicts, "mergeable_state": ms, "head_sha": head_sha, "base_sha": base_sha,
-            "merge_base": mb, "conflicts": conflicts, "failing_checks": failing, "head_changed": head_changed}
+            "merge_base": mb, "conflicts": conflicts, "failing_checks": failing, "head_changed": head_changed,
+            "review_block": review_block}
 
 
 def _pr_json(state: dict[str, Any], r: dict[str, Any], pr: dict[str, Any]) -> dict[str, Any]:
@@ -480,6 +588,7 @@ def create_or_update_file(ctx: Instance,
     s = ctx.state
     r = _repo(s, owner, repo)
     head = _branch(r, branch)
+    _check_push(s, r, branch)
     tree = dict(r["commits"][head]["tree"])
     if path in tree:
         if not sha:
@@ -492,6 +601,7 @@ def create_or_update_file(ctx: Instance,
     new = _commit(ctx, s, r, tree, [head], message, s["viewer"])
     r["branches"][branch] = new
     r["updated_at"] = _iso(ctx)
+    _pushed(ctx, r, new)
     return {"content": _content_json(r, path, tree[path], content, branch), "commit": _commit_json(r, new)}
 
 
@@ -506,6 +616,7 @@ def push_files(ctx: Instance,
     s = ctx.state
     r = _repo(s, owner, repo)
     head = _branch(r, branch)
+    _check_push(s, r, branch)
     if not files:
         raise _unprocessable("Invalid request: files must not be empty")
     tree = dict(r["commits"][head]["tree"])
@@ -515,6 +626,7 @@ def push_files(ctx: Instance,
         tree[f["path"]] = _put_blob(s, f["content"])
     new = _commit(ctx, s, r, tree, [head], message, s["viewer"])
     r["branches"][branch] = new
+    _pushed(ctx, r, new)
     return {"ref": f"refs/heads/{branch}", "node_id": f"REF_kwDO{new[:10]}",
             "url": f"{API}/repos/{r['full_name']}/git/refs/heads/{branch}", "object": {"sha": new, "type": "commit"}}
 
@@ -978,8 +1090,11 @@ def merge_pull_request(ctx: Instance,
     if st["conflicts"]:
         raise _err(405, "Pull Request is not mergeable")
     if st["failing_checks"]:
+        current = {x["context"]: x["state"] for x in r["statuses"].get(st["head_sha"], [])}.get(st["failing_checks"][0])
         raise _err(405, f"Required status check \"{st['failing_checks'][0]}\" is "
-                        f"{'expected' if not r['statuses'].get(st['head_sha']) else 'failing'}.")
+                        f"{'expected' if current is None else 'in progress' if current == 'pending' and s.get('_v1') else 'failing'}.")
+    if st["review_block"]:
+        raise _err(405, st["review_block"])
     head_tree = r["commits"][st["head_sha"]]["tree"]
     tree = dict(r["commits"][st["base_sha"]]["tree"])
     for p in st["head_changed"]:  # three-way: take the head's side of every path it changed
@@ -996,6 +1111,8 @@ def merge_pull_request(ctx: Instance,
     r["branches"][pr["base"]] = sha
     pr.update(merged=True, merged_at=_iso(ctx), merge_commit_sha=sha, merged_by=s["viewer"])
     issue.update(state="closed", closed_at=_iso(ctx), updated_at=_iso(ctx))
+    _close_referenced(ctx, r, pr, message)
+    _pushed(ctx, r, sha)
     return {"sha": sha, "merged": True, "message": "Pull Request successfully merged"}
 
 
@@ -1061,6 +1178,7 @@ def update_pull_request_branch(ctx: Instance,
     sha = _commit(ctx, s, r, tree, [st["head_sha"], st["base_sha"]], f"Merge branch '{pr['base']}' into {pr['head']}",
                   s["viewer"])
     r["branches"][pr["head"]] = sha
+    _pushed(ctx, r, sha)
     return {"message": "Updating pull request branch.", "url": f"https://github.com/{r['full_name']}/pull/{pull_number}"}
 
 
@@ -1120,6 +1238,7 @@ def act_push_commit(ctx: Instance, repo: str, branch: str, files: dict, author: 
     tree = dict(r["commits"][head]["tree"])
     tree.update({p: _put_blob(s, c) for p, c in files.items()})
     r["branches"][branch] = _commit(ctx, s, r, tree, [head], message, author)
+    _pushed(ctx, r, r["branches"][branch])
     return r["branches"][branch]
 
 

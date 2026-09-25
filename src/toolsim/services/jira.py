@@ -14,6 +14,19 @@ Seed format::
         issues:
           - {summary: Rotate prod DB credentials, type: Task, status: In Progress, assignee: john,
              priority: High, labels: [security], comments: [{author: alex, body: Due Friday}]}
+    boards:                                     # agile boards and sprints (2026-09-25.1)
+      - name: OPS board
+        project: OPS
+        type: scrum                             # or kanban (no sprints)
+        sprints:
+          - {name: OPS Sprint 7, state: active, start: "2026-09-14", end: "2026-09-28",
+             goal: Pass the audit, issues: [OPS-2]}
+
+From 2026-09-25.1: boards and sprints tools, ``sprint`` in JQL (``sprint in openSprints()``,
+``closedSprints()``, ``futureSprints()``, a sprint id or name), and issues join sprints with
+``jira_update_issue`` fields ``{"sprint": <id>}`` (or customfield_10020). Like Jira, one sprint is
+active per board, only active sprints can be completed, and completing one sends unfinished
+issues back to the backlog (or to ``move_incomplete_to``).
 """
 
 from __future__ import annotations
@@ -27,6 +40,7 @@ from ..core.instance import Instance, Service
 from ..core.tools import ToolError, action, tool
 
 SITE = "https://acme.atlassian.net"
+V1 = "2026-09-25.1"
 STATUSES = {"To Do": "new", "In Progress": "indeterminate", "In Review": "indeterminate", "Done": "done"}
 # the workflow: from-status -> [(transition id, name, to-status)]
 WORKFLOW = {
@@ -54,7 +68,8 @@ class Jira(Service):
     title = "Jira"
     description = "Simulated Jira Cloud site. Behaves like the mcp-atlassian Jira tools; nothing is really changed."
 
-    versions = {"2026-09-25": "Initial release: 16 tools modeled on sooperset/mcp-atlassian (Jira)."}
+    versions = {"2026-09-25": "Initial release: 16 tools modeled on sooperset/mcp-atlassian (Jira).",
+                V1: "Agile boards and sprints (6 tools), sprint field and sprint functions in JQL."}
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -74,6 +89,20 @@ class Jira(Service):
         c("jira_link_to_epic", {"issue_key": "OPS-4", "epic_key": "OPS-1"})
         c("jira_add_comment", {"issue_key": "SUP-1", "body": "Refund issued in SUP-3"})
         c("jira_get_user_profile", {"user_identifier": "john@acme.com"})
+        if ctx.at_least(V1):
+            board = c("jira_get_agile_boards", {"project_key": "OPS"}).data[0]["id"]
+            c("jira_get_agile_boards", {"board_type": "kanban"})
+            sprints = c("jira_get_sprints_from_board", {"board_id": board, "state": "active,future"}).data
+            c("jira_get_sprint_issues", {"sprint_id": sprints[0]["id"]})
+            c("jira_search", {"jql": "sprint in openSprints() AND assignee = currentUser()"})
+            c("jira_search", {"jql": "project = OPS AND sprint is EMPTY"})
+            c("jira_update_issue", {"issue_key": "OPS-3", "fields": json.dumps({"sprint": int(sprints[0]["id"])})})
+            c("jira_update_sprint", {"sprint_id": sprints[1]["id"], "state": "active"})
+            c("jira_update_sprint", {"sprint_id": sprints[0]["id"], "state": "closed"})
+            c("jira_get_board_issues", {"board_id": board, "jql": "sprint is EMPTY"})
+            c("jira_create_sprint", {"board_id": board, "sprint_name": "OPS Sprint 9", "start_date": "2026-10-12",
+                                     "end_date": "2026-10-26", "goal": "Cost review"})
+            c("jira_get_sprints_from_board", {"board_id": "2"})
 
     def default_seed(self) -> dict[str, Any]:
         return {
@@ -99,11 +128,23 @@ class Jira(Service):
                      "assignee": "priya"},
                 ]},
             ],
+            "boards": [
+                {"name": "OPS board", "project": "OPS", "type": "scrum", "sprints": [
+                    {"name": "OPS Sprint 6", "state": "closed", "start": "2026-08-31", "end": "2026-09-14",
+                     "issues": ["OPS-5"]},
+                    {"name": "OPS Sprint 7", "state": "active", "start": "2026-09-14", "end": "2026-09-28",
+                     "goal": "Pass the security audit", "issues": ["OPS-2", "OPS-4"]},
+                    {"name": "OPS Sprint 8", "state": "future"},
+                ]},
+                {"name": "SUP board", "project": "SUP", "type": "kanban"},
+            ],
         }
 
     def initial_state(self, seed: dict[str, Any], ctx: Instance) -> dict[str, Any]:
         me = seed.get("user") or {"account_id": "alex", "display_name": "Alex Rivera", "email": "alex@acme.com"}
         state: dict[str, Any] = {"me": me["account_id"], "users": {}, "projects": {}, "issues": {}, "links": []}
+        if ctx.at_least(V1):
+            state.update(_v1=True, boards={}, sprints={})
         for u in [me, *seed.get("users", [])]:
             state["users"][u["account_id"]] = {"account_id": u["account_id"], "display_name": u["display_name"],
                                                "email": u.get("email"), "active": u.get("active", True)}
@@ -133,6 +174,9 @@ class Jira(Service):
                 for c in i.get("comments", []):
                     _comment(ctx, issue, c.get("author", me["account_id"]), c["body"])
                 keys.append(issue["key"])
+        if ctx.at_least(V1):
+            for b in seed.get("boards", []):
+                _seed_board(ctx, state, b)
         return state
 
     actor_key = "me"
@@ -177,6 +221,8 @@ def _new_issue(ctx: Instance, state: dict[str, Any], project: str, summary: str,
              "assignee": assignee, "reporter": reporter, "labels": list(labels or []), "components": [],
              "created": _iso(ctx), "updated": _iso(ctx), "resolution": None, "resolutiondate": None, "duedate": None,
              "comments": [], "worklogs": [], "epic": None, "parent": parent, "watchers": [reporter]}
+    if state.get("_v1"):
+        issue.update(sprint=None, closed_sprints=[])
     state["issues"][key] = issue
     return issue
 
@@ -214,6 +260,7 @@ def _issue_json(state: dict[str, Any], i: dict[str, Any], comment_limit: int = 1
                      for c in i["comments"][-comment_limit:]] if comment_limit else [],
         "timetracking": {"timeSpentSeconds": sum(w["seconds"] for w in i["worklogs"])},
         "url": f"{SITE}/browse/{i['key']}",
+        **({"sprint": _sprint_brief(state, i["sprint"])} if state.get("_v1") else {}),
     }
 
 
@@ -273,12 +320,99 @@ def _apply_fields(state: dict[str, Any], i: dict[str, Any], f: dict[str, Any]) -
             i["components"] = [c.get("name") if isinstance(c, dict) else c for c in v]
         elif k in ("status",):
             raise _err("", 400, status="Field 'status' cannot be set. Use a transition instead.")
+        elif k in ("sprint", "customfield_10020") and state.get("_v1"):
+            _set_sprint(state, i, v.get("id") if isinstance(v, dict) else v)
         elif k in ("parent", "epicKey", "epic_link"):
             key = v.get("key") if isinstance(v, dict) else v
             _get(state, key)
             i["epic"] = key
         else:
             raise _err("", 400, **{k: f"Field '{k}' cannot be set. It is not on the appropriate screen, or unknown."})
+
+
+# -- boards & sprints (2026-09-25.1) ------------------------------------------------------
+
+def _date_iso(v: Any) -> str | None:
+    if v in (None, ""):
+        return None
+    try:
+        t = dt.datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except ValueError:
+        raise _err(f"Invalid date '{v}'. Use ISO 8601, e.g. 2026-10-12T09:00:00.000Z.", 400) from None
+    t = t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
+    return t.astimezone(dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+
+def _seed_board(ctx: Instance, state: dict[str, Any], b: dict[str, Any]) -> None:
+    if b.get("project") not in state["projects"]:
+        raise ValueError(f"board {b.get('name')!r} needs an existing project")
+    bid = str(ctx.next("board_id"))
+    state["boards"][bid] = {"id": bid, "name": b["name"], "type": b.get("type", "scrum"), "project": b["project"]}
+    for sp in b.get("sprints", []):
+        sprint = _new_sprint(ctx, state, bid, sp["name"], sp.get("start"), sp.get("end"), sp.get("goal"))
+        sprint["state"] = sp.get("state", "future")
+        if sprint["state"] != "future":
+            sprint["activated_date"] = sprint["start_date"]
+        if sprint["state"] == "closed":
+            sprint["complete_date"] = sprint["end_date"]
+        for key in sp.get("issues", []):
+            i = state["issues"].get(key)
+            if i is None:
+                raise ValueError(f"sprint {sp['name']!r}: no issue {key}")
+            if sprint["state"] == "closed":
+                i["closed_sprints"].append(sprint["id"])
+            else:
+                i["sprint"] = sprint["id"]
+
+
+def _new_sprint(ctx: Instance, state: dict[str, Any], board: str, name: str, start: Any, end: Any,
+                goal: str | None) -> dict[str, Any]:
+    sid = str(ctx.next("sprint_id", 40))
+    sprint = {"id": sid, "name": name, "state": "future", "start_date": _date_iso(start), "end_date": _date_iso(end),
+              "activated_date": None, "complete_date": None, "origin_board_id": board, "goal": goal or ""}
+    state["sprints"][sid] = sprint
+    return sprint
+
+
+def _board(state: dict[str, Any], board_id: Any) -> dict[str, Any]:
+    b = state["boards"].get(str(board_id))
+    if b is None:
+        raise _err(f"Board does not exist or you do not have permission to see it (board {board_id}).", 404)
+    return b
+
+
+def _sprint(state: dict[str, Any], sprint_id: Any) -> dict[str, Any]:
+    sp = state["sprints"].get(str(sprint_id))
+    if sp is None:
+        raise _err(f"Sprint with id {sprint_id} does not exist or you do not have permission to see it.", 404)
+    return sp
+
+
+def _sprint_json(sp: dict[str, Any]) -> dict[str, Any]:
+    return {k: sp[k] for k in ("id", "state", "name", "start_date", "end_date", "activated_date", "complete_date",
+                               "origin_board_id", "goal") if sp[k] is not None}
+
+
+def _sprint_brief(state: dict[str, Any], sid: str | None) -> dict[str, Any] | None:
+    sp = state["sprints"].get(sid) if sid else None
+    return {"id": sp["id"], "name": sp["name"], "state": sp["state"]} if sp else None
+
+
+def _set_sprint(state: dict[str, Any], i: dict[str, Any], sprint_id: Any) -> None:
+    if sprint_id in (None, "", 0):
+        i["sprint"] = None  # back to the backlog
+        return
+    sp = _sprint(state, sprint_id)
+    if sp["state"] == "closed":
+        raise _err("", 400, sprint="Issue can be assigned only to an active or future sprint.")
+    if state["boards"][sp["origin_board_id"]]["project"] != i["project"]:
+        raise _err("", 400, sprint=f"Issue {i['key']} is not on the board of sprint {sp['name']}.")
+    i["sprint"] = sp["id"]
+
+
+def _paged(items: list[Any], start_at: Any, limit: Any, cap: int = 50) -> list[Any]:
+    start, lim = max(0, int(start_at or 0)), max(1, min(int(limit or 10), cap))
+    return items[start:start + lim]
 
 
 # -- JQL ----------------------------------------------------------------------------------
@@ -388,15 +522,15 @@ class _JQL:
         if field[0] not in ("word", "str"):
             raise _err(f"Error in the JQL Query: Expecting a field name but got '{field[1]}'.")
         name = field[1].lower()
-        if name not in _FIELDS:
+        if name not in _FIELDS or (name == "sprint" and not self.state.get("_v1")):
             raise _err(f"Error in the JQL Query: Field '{field[1]}' does not exist or you do not have permission to view it.")
         if self._is_kw("not"):
             self.i += 1
             self._expect_kw("in")
-            return ("not in", name, self._list())
+            return ("not in", name, self._func() or self._list())
         if self._is_kw("in"):
             self.i += 1
-            return ("in", name, self._list())
+            return ("in", name, self._func() or self._list())
         if self._is_kw("is"):
             self.i += 1
             neg = self._is_kw("not")
@@ -408,6 +542,14 @@ class _JQL:
         if op[0] != "op":
             raise _err(f"Error in the JQL Query: Expecting operator but got '{op[1]}'.")
         return (op[1], name, self._value())
+
+    def _func(self) -> list[Any] | None:
+        """``in openSprints()`` and friends: a function instead of a (list)."""
+        t = self._peek()
+        if t and t[0] == "word" and t[1].endswith("()"):
+            self.i += 1
+            return [t[1]]
+        return None
 
     def _list(self) -> list[Any]:
         if self._next()[0] != "(":
@@ -440,6 +582,7 @@ class _JQL:
         if op == "is not empty":
             return have not in (None, [], "")
         vals = [self._norm_value(field, v) for v in (value if isinstance(value, list) else [value])]
+        vals = [x for v in vals for x in (v if isinstance(v, tuple) else [v])]  # functions expand to many
         if op in ("in", "="):
             return any(self._eq(have, v) for v in vals)
         if op in ("not in", "!="):
@@ -472,11 +615,24 @@ class _JQL:
             "duedate": i["duedate"], "resolved": i["resolutiondate"], "resolutiondate": i["resolutiondate"],
             "parent": i["parent"] or i["epic"], "\"epic link\"": i["epic"], "epic link": i["epic"],
             "watcher": i["watchers"],
+            "sprint": [*i.get("closed_sprints", []), *([i["sprint"]] if i.get("sprint") else [])],
         }.get(field)
 
     def _norm_value(self, field: str, v: Any) -> Any:
         if isinstance(v, str) and v.lower() == "currentuser()":
             return self.state["me"]
+        if field == "sprint" and v is not None:
+            sprints = self.state["sprints"].values()
+            fn = {"opensprints()": ("active", "future"), "closedsprints()": ("closed",),
+                  "futuresprints()": ("future",)}.get(str(v).lower())
+            if fn:
+                return tuple(sp["id"] for sp in sprints if sp["state"] in fn)
+            if str(v).lower().endswith("()"):
+                raise _err(f"Error in the JQL Query: Unable to find JQL function '{v}'.")
+            hit = next((sp["id"] for sp in sprints if sp["id"] == str(v) or sp["name"].lower() == str(v).lower()), None)
+            if hit is None:
+                raise _err(f"Error in the JQL Query: The value '{v}' does not exist for the field 'sprint'.")
+            return hit
         if field in ("assignee", "reporter", "watcher") and isinstance(v, str):
             try:
                 return _resolve_user(self.state, v)
@@ -525,7 +681,7 @@ class _JQL:
 
 _FIELDS = {"project", "key", "issuekey", "id", "summary", "description", "text", "status", "statuscategory", "type",
            "issuetype", "priority", "assignee", "reporter", "labels", "label", "component", "resolution", "created",
-           "updated", "duedate", "resolved", "resolutiondate", "parent", "\"epic link\"", "epic link", "watcher"}
+           "updated", "duedate", "resolved", "resolutiondate", "parent", "\"epic link\"", "epic link", "watcher", "sprint"}
 
 
 def _to_dt(s: str) -> dt.datetime:
@@ -850,10 +1006,135 @@ def jira_get_user_profile(ctx: Instance,
     return {"success": True, "user": {**_user_json(s, uid), "active": u["active"], "time_zone": "America/Los_Angeles"}}
 
 
+@tool("jira_get_agile_boards", read_only=True, since=V1)
+def jira_get_agile_boards(ctx: Instance,
+                          board_name: Annotated[str | None, "(Optional) The name of board, support fuzzy search"] = None,
+                          project_key: Annotated[str | None, "(Optional) Jira project key (e.g., 'PROJ-123')"] = None,
+                          board_type: Annotated[str | None, "(Optional) The type of jira board (e.g., 'scrum', 'kanban')"] = None,
+                          start_at: Annotated[int | None, "Starting index for pagination (0-based)"] = 0,
+                          limit: Annotated[int | None, "Maximum number of results (1-50)"] = 10) -> list[dict[str, Any]]:
+    """Get jira agile boards by name, project key, or type"""
+    boards = [{"id": b["id"], "name": b["name"], "type": b["type"]} for b in ctx.state["boards"].values()
+              if (not board_name or board_name.lower() in b["name"].lower())
+              and (not project_key or b["project"] == project_key.upper())
+              and (not board_type or b["type"] == board_type.lower())]
+    return _paged(boards, start_at, limit)
+
+
+@tool("jira_get_board_issues", read_only=True, since=V1)
+def jira_get_board_issues(ctx: Instance,
+                          board_id: Annotated[str, "The id of the board (e.g., '1001')"],
+                          jql: Annotated[str, "JQL query string (Jira Query Language). Examples: 'assignee = currentUser() AND status = \"In Progress\"'"],
+                          fields: Annotated[str | None, "Comma-separated fields to return, or '*all'"] = None,
+                          start_at: Annotated[int | None, "Starting index for pagination (0-based)"] = 0,
+                          limit: Annotated[int | None, "Maximum number of results (1-50)"] = 10,
+                          expand: Annotated[str | None, "Optional fields to expand in the response (e.g., 'changelog')"] = "version") -> dict[str, Any]:
+    """Get all issues linked to a specific board filtered by JQL"""
+    b = _board(ctx.state, board_id)
+    q = f"project = {b['project']}" + (f" AND ({jql})" if jql.strip() and not jql.strip().lower().startswith("order by")
+                                       else "") + (f" {jql}" if jql.strip().lower().startswith("order by") else "")
+    return jira_search.fn(ctx, jql=q, limit=limit, start_at=start_at)
+
+
+@tool("jira_get_sprints_from_board", read_only=True, since=V1)
+def jira_get_sprints_from_board(ctx: Instance,
+                                board_id: Annotated[str, "The id of board (e.g., '1000')"],
+                                state: Annotated[str | None, "Sprint state (e.g., 'active', 'future', 'closed')"] = None,
+                                start_at: Annotated[int | None, "Starting index for pagination (0-based)"] = 0,
+                                limit: Annotated[int | None, "Maximum number of results (1-50)"] = 10) -> list[dict[str, Any]]:
+    """Get jira sprints from board by state"""
+    b = _board(ctx.state, board_id)
+    if b["type"] != "scrum":
+        raise _err("The board does not support sprints", 400)
+    want = {x.strip().lower() for x in (state or "").split(",") if x.strip()}
+    sprints = [_sprint_json(sp) for sp in ctx.state["sprints"].values()
+               if sp["origin_board_id"] == b["id"] and (not want or sp["state"] in want)]
+    return _paged(sprints, start_at, limit)
+
+
+@tool("jira_get_sprint_issues", read_only=True, since=V1)
+def jira_get_sprint_issues(ctx: Instance,
+                           sprint_id: Annotated[str, "The id of sprint (e.g., '10001')"],
+                           fields: Annotated[str | None, "Comma-separated fields to return, or '*all'"] = None,
+                           start_at: Annotated[int | None, "Starting index for pagination (0-based)"] = 0,
+                           limit: Annotated[int | None, "Maximum number of results (1-50)"] = 10) -> dict[str, Any]:
+    """Get jira issues from sprint"""
+    sp = _sprint(ctx.state, sprint_id)
+    return jira_search.fn(ctx, jql=f"sprint = {sp['id']} ORDER BY key ASC", limit=limit, start_at=start_at)
+
+
+@tool("jira_create_sprint", since=V1)
+def jira_create_sprint(ctx: Instance,
+                       board_id: Annotated[str, "The id of board (e.g., '1000')"],
+                       sprint_name: Annotated[str, "Name of the sprint (e.g., 'Sprint 1')"],
+                       start_date: Annotated[str, "Start time for sprint (ISO 8601 format)"],
+                       end_date: Annotated[str, "End time for sprint (ISO 8601 format)"],
+                       goal: Annotated[str | None, "(Optional) Goal of the sprint"] = None) -> dict[str, Any]:
+    """Create Jira sprint for a board"""
+    s = ctx.state
+    b = _board(s, board_id)
+    if b["type"] != "scrum":
+        raise _err("The board does not support sprints", 400)
+    if not sprint_name.strip():
+        raise _err("", 400, name="Sprint name is required.")
+    if _date_iso(end_date) <= _date_iso(start_date):
+        raise _err("", 400, endDate="The sprint end date must be after the start date.")
+    return _sprint_json(_new_sprint(ctx, s, b["id"], sprint_name, start_date, end_date, goal))
+
+
+@tool("jira_update_sprint", since=V1)
+def jira_update_sprint(ctx: Instance,
+                       sprint_id: Annotated[str, "The id of sprint (e.g., '10001')"],
+                       sprint_name: Annotated[str | None, "(Optional) New name for the sprint"] = None,
+                       state: Annotated[str | None, "(Optional) New state for the sprint (future|active|closed)"] = None,
+                       start_date: Annotated[str | None, "(Optional) New start date for the sprint"] = None,
+                       end_date: Annotated[str | None, "(Optional) New end date for the sprint"] = None,
+                       goal: Annotated[str | None, "(Optional) New goal for the sprint"] = None,
+                       move_incomplete_to: Annotated[str | None, "(Optional) When closing: id of a future sprint for unfinished issues (default: the backlog)"] = None) -> dict[str, Any]:
+    """Update jira sprint"""
+    s = ctx.state
+    sp = _sprint(s, sprint_id)
+    if sp["state"] == "closed":
+        raise _err("Cannot update a closed sprint.", 400)
+    if sprint_name is not None:
+        sp["name"] = sprint_name
+    if goal is not None:
+        sp["goal"] = goal
+    if start_date:
+        sp["start_date"] = _date_iso(start_date)
+    if end_date:
+        sp["end_date"] = _date_iso(end_date)
+    new = (state or sp["state"]).lower()
+    if new not in ("future", "active", "closed"):
+        raise _err("", 400, state=f"Invalid sprint state '{state}'. Use future, active or closed.")
+    if new == "active" and sp["state"] == "future":
+        if not sp["start_date"] or not sp["end_date"]:
+            raise _err("", 400, startDate="A sprint needs a start and end date to be started.")
+        if any(o["state"] == "active" and o["origin_board_id"] == sp["origin_board_id"] for o in s["sprints"].values()):
+            raise _err("Sprint cannot be started: another sprint is already active on this board. Complete it first.", 400)
+        sp.update(state="active", activated_date=_iso(ctx).replace("+0000", "Z"))
+    elif new == "closed" and sp["state"] != "closed":
+        if sp["state"] != "active":
+            raise _err("Sprint must be active to be completed.", 400)
+        target = _sprint(s, move_incomplete_to) if move_incomplete_to else None
+        if target is not None and (target["state"] != "future" or target["origin_board_id"] != sp["origin_board_id"]):
+            raise _err("", 400, move_incomplete_to="Unfinished issues can only move to a future sprint on the same board.")
+        for i in s["issues"].values():
+            if i.get("sprint") == sp["id"]:
+                i["closed_sprints"].append(sp["id"])
+                i["sprint"] = None if STATUSES[i["status"]] == "done" or target is None else target["id"]
+                i["updated"] = _iso(ctx)
+        sp.update(state="closed", complete_date=_iso(ctx).replace("+0000", "Z"))
+    elif new == "future" and sp["state"] == "active":
+        raise _err("An active sprint can't be moved back to future.", 400)
+    return _sprint_json(sp)
+
+
 Jira.tools = [jira_search, jira_get_issue, jira_create_issue, jira_batch_create_issues, jira_update_issue,
               jira_delete_issue, jira_assign_issue, jira_transition_issue, jira_get_transitions, jira_add_comment,
               jira_add_worklog, jira_get_all_projects, jira_get_project_issues, jira_create_issue_link, jira_link_to_epic,
-              jira_get_user_profile]
+              jira_get_user_profile, jira_get_agile_boards, jira_get_board_issues, jira_get_sprints_from_board,
+              jira_get_sprint_issues, jira_create_sprint, jira_update_sprint]
 
 
 # -- world actions (triggered by environments, never by agents) --------------------------
@@ -884,4 +1165,18 @@ def act_assign(ctx: Instance, issue_key: str, assignee: str | None) -> None:
     i["updated"] = _iso(ctx)
 
 
-Jira.actions = [act_set_status, act_add_comment, act_assign]
+@action("move_to_sprint")
+def act_move_to_sprint(ctx: Instance, issue_key: str, sprint: str | None) -> None:
+    """A teammate pulls an issue into a sprint (by id or name) or back to the backlog (None)."""
+    s = ctx.state
+    sid = None
+    if sprint:
+        sid = next((sp["id"] for sp in s["sprints"].values() if sprint in (sp["id"], sp["name"])), None)
+        if sid is None:
+            raise _err(f"no sprint {sprint}")
+    i = _get(s, issue_key)
+    _set_sprint(s, i, sid)
+    i["updated"] = _iso(ctx)
+
+
+Jira.actions = [act_set_status, act_add_comment, act_assign, act_move_to_sprint]

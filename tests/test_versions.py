@@ -15,7 +15,8 @@ def test_every_released_version_still_matches_its_freeze():
 def test_every_service_has_versions_and_a_probe():
     for name, cls in SERVICES.items():
         assert cls.versions, name
-        assert all(len(v) == 10 and v[4] == v[7] == "-" for v in cls.versions), f"{name}: versions are YYYY-MM-DD"
+        import re
+        assert all(re.fullmatch(r"\d{4}-\d{2}-\d{2}(\.\d+)?", v) for v in cls.versions), f"{name}: YYYY-MM-DD[.N]"
         assert fingerprint(name, cls.latest_version())["probe_calls"] >= 5, f"{name}: probe too thin"
 
 

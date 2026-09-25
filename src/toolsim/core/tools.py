@@ -27,6 +27,12 @@ class ToolError(Exception):
         self.status = status
 
 
+def version_key(v: str) -> tuple[str, int]:
+    """Versions are dates, optionally with a same-day revision: 2026-09-25 < 2026-09-25.1 < 2026-09-26."""
+    date, _, rev = str(v).partition(".")
+    return date, int(rev or 0)
+
+
 @dataclass
 class Tool:
     name: str
@@ -41,7 +47,9 @@ class Tool:
     until: str | None = None   # first service version that no longer has it
 
     def in_version(self, version: str) -> bool:
-        return (self.since is None or version >= self.since) and (self.until is None or version < self.until)
+        v = version_key(version)
+        return ((self.since is None or v >= version_key(self.since))
+                and (self.until is None or v < version_key(self.until)))
 
     def mcp_definition(self) -> dict[str, Any]:
         return {

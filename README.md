@@ -29,12 +29,12 @@ Environment  (task + subset of servers + seeds + faults + checks)      envs/*.ya
 
 | Service | Tools | Interface matches | Fidelity | Built-in traps |
 |---|---|---|---|---|
-| `gmail` | 19 | GongRzhe/Gmail-MCP-Server | documented | Gmail search syntax, threads, system labels can't be deleted |
-| `calendar` | 11 | nspady/google-calendar-mcp | documented | time zones, read-only calendars (403), delete twice (410), invites and RSVPs |
-| `slack` | 8 | reference Slack MCP server | documented | `not_in_channel`, hidden private channels, duplicate reactions |
-| `github` | 26 | reference GitHub MCP server | documented | real git SHAs, merge conflicts, required checks, duplicate PRs |
-| `jira` | 16 | sooperset/mcp-atlassian | documented | workflow transitions, JQL, "status can't be set directly" |
-| `drive` | 12 | taylorwilsdon/google_workspace_mcp | documented | reader-only files, admin blocks external sharing, Drive query syntax |
+| `gmail` | 19 | GongRzhe/Gmail-MCP-Server | documented | Gmail search syntax, threads, system labels can't be deleted, bounces for typo'd addresses, out-of-office replies, daily send quota |
+| `calendar` | 11 | nspady/google-calendar-mcp | documented | time zones, read-only calendars (403), delete twice (410), recurring events (RRULE/EXDATE, per-instance edits, `modificationScope`), colleagues who accept or decline |
+| `slack` | 8 | reference Slack MCP server | documented | `not_in_channel`, hidden private channels, duplicate reactions, channel IDs required (names only for posting), DMs by user ID, `@name` isn't a mention |
+| `github` | 26 | reference GitHub MCP server | documented | real git SHAs, merge conflicts, protected branches, required checks and approvals, CI that runs on push, closing keywords |
+| `jira` | 22 | sooperset/mcp-atlassian | documented | workflow transitions, JQL (with sprint functions), boards and sprints, "status can't be set directly" |
+| `drive` | 23 | taylorwilsdon/google_workspace_mcp | documented (Sheets/Docs: preview) | reader-only files, admin blocks external sharing, Drive query syntax, A1 ranges, formulas, grid limits, Docs indices |
 | `linear` | 23 | Linear hosted MCP | preview | team-scoped states and labels |
 | `notion` | 12 | Notion hosted MCP (core tools) | preview | restricted pages are invisible, strict status options |
 
@@ -159,6 +159,12 @@ events:
   - {server: github, action: set_status, before: {tool: merge_pull_request}, params: {…}}
   - {server: drive, action: revoke_access, after_calls: 5, params: {…}}
 ```
+
+Services also react on their own (from the `2026-09-25.1` versions), with a realistic delay:
+mail to a typo'd address bounces, out-of-office and colleague replies arrive (`auto_replies`),
+invitees answer by policy (`auto_respond`), Slack colleagues reply (`responders`), and CI finishes
+after a push (`ci`). These are scheduled in virtual time, so they land when time passes (the
+agent's later calls, `advance`, or latency faults), and they're part of snapshots.
 
 Events without a trigger are part of the starting world. Events are deterministic, and snapshots
 and forks include which ones have fired. A harness can also inject events into a live run

@@ -18,16 +18,28 @@ Seed format::
         messages:
           - {user: john, text: "Deploy is done", reactions: {tada: [alex]},
              replies: [{user: alex, text: "Nice!"}]}
+    responders:                               # colleagues who answer (2026-09-25.1)
+      - {user: john, when: {mention: true}, reply: "Looking now", delay: 2m}
+      - {user: priya, when: {dm: true, "text~": deploy}, reply: "It's out", times: 2}
+
+From 2026-09-25.1, like the real API: posting to a user ID (U...) opens a DM (a D... channel);
+only slack_post_message accepts channel names, every other tool needs the channel ID
+(``channel_not_found`` otherwise); and responders reply a while later. A responder's ``when`` can
+have ``channel`` (name), ``dm``, ``mention`` (a real ``<@U123>`` mention: a plain "@john"
+notifies nobody) and ``text~``; with no ``when`` it answers DMs and mentions. It replies in the
+thread (``thread: false`` for top level; DMs reply top level) up to ``times`` times (default 1).
 """
 
 from __future__ import annotations
 
 import base64
+import re
 from typing import Annotated, Any
 
 from ..core.instance import Instance, Service
 from ..core.tools import ToolError, action, tool
 
+V1 = "2026-09-25.1"
 MAX_TEXT = 40000
 EMOJI = {"thumbsup", "+1", "white_check_mark", "eyes", "tada", "heart", "rocket", "fire", "joy", "pray", "100", "raised_hands",
          "wave", "clap", "thinking_face", "warning", "x", "heavy_check_mark", "smile", "slightly_smiling_face", "ok_hand",
@@ -43,7 +55,9 @@ class Slack(Service):
     title = "Slack"
     description = "Simulated Slack workspace. Behaves like the Slack MCP server; nothing is really posted."
 
-    versions = {"2026-09-25": "Initial release: 8 tools modeled on the reference Slack MCP server."}
+    versions = {"2026-09-25": "Initial release: 8 tools modeled on the reference Slack MCP server.",
+                V1: "DMs by posting to a user ID, channel IDs required outside slack_post_message, "
+                    "colleagues who reply (responders)."}
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -60,6 +74,13 @@ class Slack(Service):
         c("slack_post_message", {"channel_id": chans["random"], "text": "hi"})
         c("slack_post_message", {"channel_id": chans["leadership"], "text": "hi"})
         c("slack_get_user_profile", {"user_id": next(iter(ctx.state["users"]))})
+        if ctx.at_least(V1):
+            john = next(u["id"] for u in ctx.state["users"].values() if u["name"] == "john")
+            dm = c("slack_post_message", {"channel_id": john, "text": "Are you around?"}).data["channel"]
+            c("slack_get_channel_history", {"channel_id": dm})
+            c("slack_get_channel_history", {"channel_id": "general"})
+            c("slack_post_message", {"channel_id": "#general", "text": "by name"})
+            c("slack_list_channels", {})
 
     def default_seed(self) -> dict[str, Any]:
         return {
@@ -98,6 +119,15 @@ class Slack(Service):
         state["acting"] = state["bot_user"]  # who the current call acts as (see Service.actor_key)
         for u in seed.get("users", []):
             _new_user(ctx, state, u)
+        if ctx.at_least(V1):
+            state["_strict_ids"] = True
+            state["_responders"] = []
+            for r in seed.get("responders", []):
+                if r.get("user") not in state["_by_name"]:
+                    raise ValueError(f"responder {r.get('user')!r} is not a user in this workspace")
+                state["_responders"].append({"user": state["_by_name"][r["user"]], "when": dict(r.get("when") or {}),
+                                             "reply": r["reply"], "delay": _delay(r.get("delay", "1m")),
+                                             "thread": r.get("thread", True), "times": int(r.get("times", 1)), "fired": 0})
         base = int(ctx.now().timestamp()) - 3 * 86400
         for c in seed.get("channels", []):
             cid = ("G" if c.get("private") else "C") + ctx.token(10)
@@ -136,10 +166,11 @@ class Slack(Service):
     def grading_view(self, state: dict[str, Any]) -> dict[str, Any]:
         """Messages annotated with channel name and author, so checks can say "posted in #api-oncall"."""
         names = {u["id"]: u["name"] for u in state["users"].values()}
-        msgs = [{**m, "channel": ch["name"], "channel_id": cid, "user_name": names.get(m["user"]),
+        msgs = [{**m, "channel": ch["name"] or _dm_name(state, ch), "channel_id": cid, "is_dm": bool(ch.get("is_im")), "user_name": names.get(m["user"]),
                  "from_bot": m["user"] == state["bot_user"], "is_reply": bool(m.get("parent_user_id"))}
                 for cid, ch in state["channels"].items() for m in state["messages"].get(cid, [])]
-        return {**state, "messages": msgs, "channels": {c["name"]: c for c in state["channels"].values()}}
+        return {**state, "messages": msgs,
+                "channels": {c["name"] or _dm_name(state, c): c for c in state["channels"].values()}}
 
     def error_shape(self, status: int, message: str) -> Any:
         return {"ok": False, "error": {404: "not_found", 500: "internal_error", 502: "fatal_error",
@@ -194,9 +225,44 @@ def _add_reply(state: dict[str, Any], cid: str, parent: dict[str, Any], reply: d
     state["messages"][cid].append(reply)
 
 
-def _channel(state: dict[str, Any], channel_id: str, *, need_member: bool = True) -> dict[str, Any]:
-    ch = state["channels"].get(channel_id) or next(
-        (c for c in state["channels"].values() if f"#{c['name']}" == channel_id or c["name"] == channel_id), None)
+def _dm_name(state: dict[str, Any], ch: dict[str, Any]) -> str:
+    """How graders name a DM: dm:john (with the bot) or dm:alex,john."""
+    names = {u["id"]: u["name"] for u in state["users"].values()}
+    return "dm:" + ",".join(sorted(names[m] for m in ch["members"] if m != state["bot_user"]))
+
+
+def _delay(v: Any) -> float:
+    m = re.fullmatch(r"\+?(\d+(?:\.\d+)?)([smhd]?)", str(v).strip())
+    if not m:
+        raise ValueError(f"invalid delay {v!r} (e.g. 30s, 2m)")
+    return float(m.group(1)) * {"": 1, "s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)]
+
+
+def _open_dm(ctx: Instance, state: dict[str, Any], user_id: str) -> dict[str, Any] | None:
+    """Posting to a user ID lands in your DM with them (created on first use)."""
+    user = state["users"].get(user_id)
+    if user is None or user["deleted"]:
+        return None
+    me = state["acting"]
+    if user_id == me:
+        raise _fail("cannot_dm_bot" if user["is_bot"] else "channel_not_found")
+    pair = sorted({me, user_id})
+    ch = next((c for c in state["channels"].values() if c.get("is_im") and sorted(c["members"]) == pair), None)
+    if ch is None:
+        cid = "D" + ctx.token(10)
+        ch = {"id": cid, "name": "", "is_channel": False, "is_group": False, "is_im": True, "is_private": True,
+              "is_archived": False, "is_general": False, "created": int(ctx.now().timestamp()), "creator": me,
+              "user": user_id, "members": pair}
+        state["channels"][cid] = ch
+        state["messages"][cid] = []
+    return ch
+
+
+def _channel(state: dict[str, Any], channel_id: str, *, need_member: bool = True, by_name: bool = False) -> dict[str, Any]:
+    ch = state["channels"].get(channel_id)
+    if ch is None and (by_name or not state.get("_strict_ids")):  # from 2026-09-25.1 only posting accepts names
+        ch = next((c for c in state["channels"].values()
+                   if c["name"] and (f"#{c['name']}" == channel_id or c["name"] == channel_id)), None)
     if ch is None or (ch["is_private"] and state["acting"] not in ch["members"]):
         raise _fail("channel_not_found")  # private channels are invisible to non-members
     if ch["is_archived"]:
@@ -242,7 +308,7 @@ def slack_list_channels(ctx: Instance,
     s = ctx.state
     chans = [{k: v for k, v in c.items() if k != "members"} | {"num_members": len(c["members"]),
                                                                "is_member": s["acting"] in c["members"]}
-             for c in s["channels"].values() if not c["is_private"] and not c["is_archived"]]
+             for c in s["channels"].values() if not c["is_private"] and not c["is_archived"] and not c.get("is_im")]
     page, nxt = _page(chans, limit or 100, cursor)
     return {"ok": True, "channels": page, "response_metadata": {"next_cursor": nxt}}
 
@@ -253,10 +319,12 @@ def slack_post_message(ctx: Instance,
                        text: Annotated[str, "The message text to post"]) -> dict[str, Any]:
     """Post a new message to a Slack channel"""
     s = ctx.state
-    ch = _channel(s, channel_id)
+    dm = _open_dm(ctx, s, channel_id) if s.get("_strict_ids") and channel_id[:1] in "UWB" else None
+    ch = dm or _channel(s, channel_id, by_name=True)
     _check_text(text)
     msg = _msg(s, s["acting"], text, _ts(ctx))
     s["messages"][ch["id"]].append(msg)
+    _responders(ctx, ch, msg)
     return {"ok": True, "channel": ch["id"], "ts": msg["ts"], "message": msg}
 
 
@@ -276,6 +344,7 @@ def slack_reply_to_thread(ctx: Instance,
         parent = _find(s, ch["id"], parent["thread_ts"])
     reply = _msg(s, s["acting"], text, _ts(ctx))
     _add_reply(s, ch["id"], parent, reply)
+    _responders(ctx, ch, reply)
     return {"ok": True, "channel": ch["id"], "ts": reply["ts"], "message": reply}
 
 
@@ -348,6 +417,28 @@ def slack_get_user_profile(ctx: Instance, user_id: Annotated[str, "The ID of the
     return {"ok": True, "profile": u["profile"]}
 
 
+def _responders(ctx: Instance, ch: dict[str, Any], msg: dict[str, Any]) -> None:
+    """Colleagues who answer what the agent posts, a little later (2026-09-25.1)."""
+    s = ctx.state
+    for r in s.get("_responders") or []:
+        uid, w = r["user"], r["when"]
+        if uid == s["acting"] or uid not in ch["members"] or r["fired"] >= r["times"]:
+            continue
+        is_dm, mentioned = bool(ch.get("is_im")), f"<@{uid}>" in msg["text"]
+        if not w:
+            hit = is_dm or mentioned
+        else:
+            hit = ((not w.get("channel") or w["channel"].lstrip("#") == ch["name"])
+                   and (not w.get("dm") or is_dm) and (not w.get("mention") or mentioned)
+                   and (not w.get("text~") or w["text~"].lower() in msg["text"].lower()))
+        if not hit:
+            continue
+        r["fired"] += 1
+        thread = msg.get("thread_ts") or (msg["ts"] if r["thread"] and not is_dm else None)
+        ctx.schedule(r["delay"], "post_message", {"channel": ch["id"], "user": uid, "text": r["reply"],
+                                                  "thread_ts": thread}, reason=f"{s['users'][uid]['name']} replies")
+
+
 Slack.tools = [slack_list_channels, slack_post_message, slack_reply_to_thread, slack_add_reaction,
                slack_get_channel_history, slack_get_thread_replies, slack_get_users, slack_get_user_profile]
 
@@ -355,7 +446,7 @@ Slack.tools = [slack_list_channels, slack_post_message, slack_reply_to_thread, s
 # -- world actions (triggered by environments, never by agents) --------------------------
 
 def _chan_by_name(state: dict[str, Any], name: str) -> dict[str, Any]:
-    ch = next((c for c in state["channels"].values() if c["name"] == name.lstrip("#") or c["id"] == name), None)
+    ch = next((c for c in state["channels"].values() if c["id"] == name or (c["name"] and c["name"] == name.lstrip("#"))), None)
     if ch is None:
         raise _fail("channel_not_found")
     return ch
@@ -370,12 +461,16 @@ def _user_id(state: dict[str, Any], who: str) -> str:
 
 
 @action("post_message")
-def act_post_message(ctx: Instance, channel: str, user: str, text: str, thread_of: str | None = None) -> str:
-    """A colleague posts (optionally replying in the thread whose parent contains ``thread_of``)."""
+def act_post_message(ctx: Instance, channel: str, user: str, text: str, thread_of: str | None = None,
+                     thread_ts: str | None = None) -> str:
+    """A colleague posts (optionally replying in the thread whose parent contains ``thread_of``, or
+    under the message ``thread_ts``)."""
     s = ctx.state
     ch = _chan_by_name(s, channel)
     msg = _msg(s, _user_id(s, user), text, _ts(ctx))
-    if thread_of:
+    if thread_ts:
+        _add_reply(s, ch["id"], _find(s, ch["id"], thread_ts), msg)
+    elif thread_of:
         parent = next((m for m in s["messages"][ch["id"]] if not m.get("parent_user_id") and thread_of.lower()
                        in m["text"].lower()), None)
         if parent is None:
