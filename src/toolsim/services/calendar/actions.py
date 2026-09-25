@@ -6,7 +6,7 @@ from typing import Any
 
 from ...core.instance import Instance
 from ...core.tools import action
-from .model import _err, _is_instance, _mail_organizer, _new_event, _parse
+from .model import _err, _is_instance, _mail_attendees, _mail_organizer, _new_event, _parse
 from .recurrence import _busy_spans, _lookup, _occurrences, _save_instance
 
 
@@ -25,8 +25,10 @@ def act_add_event(ctx: Instance, calendar: str, summary: str, start: str, end: s
     cid = calendar.lower()
     if cid not in ctx.state["calendars"]:
         raise _err(404, f"no calendar {calendar}")
-    return _new_event(ctx, ctx.state, cid, {"summary": summary, "start": start, "end": end,
-                                            "attendees": attendees or []}, actor=cid)["id"]
+    ev = _new_event(ctx, ctx.state, cid, {"summary": summary, "start": start, "end": end,
+                                          "attendees": attendees or []}, actor=cid)
+    _mail_attendees(ctx, ev, "invite", "all", by=cid)
+    return ev["id"]
 
 
 @action("add_busy")
@@ -53,6 +55,7 @@ def act_cancel_event(ctx: Instance, summary: str) -> None:
     ev = _find_event(ctx, summary)
     ev["status"] = "cancelled"
     ev["updated"] = ctx.now().isoformat()
+    _mail_attendees(ctx, ev, "cancel", "all", by=ev["organizer"]["email"])
 
 
 def _schedule_responses(ctx: Instance, ev: dict[str, Any], invited: list[str]) -> None:

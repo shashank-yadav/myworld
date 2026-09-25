@@ -139,8 +139,9 @@ def _person(state: dict[str, Any], email: str) -> str:
 
 
 def _mail_attendees(ctx: Instance, ev: dict[str, Any], kind: str, send_updates: str | None,
-                    only: set[str] | None = None) -> None:
-    """Invitation / update / cancellation emails to the attendees, as Google Calendar sends them."""
+                    only: set[str] | None = None, by: str | None = None) -> None:
+    """Invitation / update / cancellation emails to the attendees, as Google Calendar sends them
+    (not to the organizer or to ``by``, whoever made the change: the acting user by default)."""
     s = ctx.state
     if not s.get("_v2") or send_updates == "none" or ev.get("status") == "cancelled" and kind != "cancel":
         return
@@ -150,7 +151,7 @@ def _mail_attendees(ctx: Instance, ev: dict[str, Any], kind: str, send_updates: 
     title = {"invite": "Invitation", "update": "Updated invitation", "cancel": "Canceled event"}[kind]
     for a in ev.get("attendees", []):
         to = a["email"]
-        if to in (organizer, ctx.actor) or (only is not None and to not in only):
+        if to in (organizer, by or ctx.actor) or (only is not None and to not in only):
             continue
         if send_updates == "externalOnly" and to.split("@")[1] in domains:
             continue

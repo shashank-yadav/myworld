@@ -30,12 +30,12 @@ checks:
   - name: John received Alex's proposal
     server: gmail
     state: "mailboxes[john@acme.com].messages"
-    where: {from~: alex@acme.com, labelIds: [INBOX]}
+    where: {from~: alex@acme.com, subject~: q4, labelIds: [INBOX], "!subject~re": "^(Invitation|Updated invitation):"}  # not the invite
     min: 1
   - name: Alex received John's reply
     server: gmail
     state: "mailboxes[alex@acme.com].messages"
-    where: {from~: john@acme.com, labelIds: [INBOX]}
+    where: {from~: john@acme.com, subject~re: "^re:.*q4", labelIds: [INBOX]}  # a reply: not the seeded thread or the RSVP
     min: 1
   - name: John's agent accepted the invite itself
     server: calendar

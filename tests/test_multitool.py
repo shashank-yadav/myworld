@@ -234,3 +234,55 @@ def test_anyone_at_the_company_gets_a_my_drive_on_first_use():
     assert "mine.txt" not in d.call("list_drive_items", {}).text, "it's in their Drive, not alex's"
     with pytest.raises(ValueError):
         d.resolve_actor("someone@other.io")
+
+
+@pytest.mark.parametrize("kind,error,invites", [("timeout_after_commit", True, 1), ("duplicate_commit", False, 2),
+                                                ("server_error", True, 0)])
+def test_faults_and_notifications_agree_with_what_happened(kind, error, invites):
+    run = EnvRun(Environment.from_dict({"name": "w", "servers": {"gmail": {}, "calendar": {}},
+                                        "faults": [{"server": "calendar", "kind": kind, "tool": "create-event"}]}))
+    r = run.instances["calendar"].call("create-event", {"summary": "T", "start": "2026-09-24T10:00:00",
+                                                        "end": "2026-09-24T10:30:00",
+                                                        "attendees": [{"email": "john@acme.com"}]})
+    events = [e for e in run.instances["calendar"].state["events"].values() if e["summary"] == "T"]
+    assert r.is_error == error
+    assert len(events) == invites == sum("Invitation: T" in s for s in inbox(run, "john@acme.com")), \
+        "one email per event that really exists, whatever the agent was told"
+
+
+def test_parallel_episodes_in_multi_tool_worlds():
+    from toolsim.rl import EnvPool
+    spec = {"name": "invite", "servers": {"gmail": {}, "calendar": {}},
+            "checks": [{"server": "gmail", "state": "mailboxes[john@acme.com].messages",
+                        "where": {"subject~": "Invitation: Sync"}, "min": 1}]}
+    act = {"tool": "calendar__create-event", "arguments": {"summary": "Sync", "start": "2026-09-24T10:00:00",
+                                                          "end": "2026-09-24T10:30:00",
+                                                          "attendees": [{"email": "john@acme.com"}]}}
+    with EnvPool(workers=2, max_steps=3) as pool:
+        pool.reset([spec] * 4)
+        pool.step([act, None, act, None])
+        results = pool.step([{"tool": "submit", "arguments": {"answer": "done"}}] * 4)
+    assert [r[1] for r in results] == [1.0, 0.0, 1.0, 0.0]
+
+
+def test_colleagues_booking_or_cancelling_in_the_world_email_the_invitees():
+    run = world("gmail", "calendar")
+    run.inject("calendar", "add_event", {"calendar": "john@acme.com", "summary": "Roadmap", "start": "2026-09-24T13:00:00",
+                                         "end": "2026-09-24T13:30:00", "attendees": ["alex@acme.com"]})
+    assert any(s.startswith("Invitation: Roadmap @") for s in inbox(run))
+    run.inject("calendar", "cancel_event", {"summary": "Roadmap"})
+    assert any(s.startswith("Canceled event: Roadmap @") for s in inbox(run))
+
+
+def test_seeded_mail_is_in_every_participant_mailbox():
+    run = world("gmail")
+    g = run.instances["gmail"].state["mailboxes"]
+    from_john = [m for m in g["alex@acme.com"]["messages"].values() if "john@acme.com" in m["from"]]
+    assert from_john
+    johns = {m["messageId"]: m for m in g["john@acme.com"]["messages"].values()}
+    for m in from_john:
+        assert johns[m["messageId"]]["labelIds"] == ["SENT"], "what Alex got from John is in John's Sent"
+    r = run.instances["gmail"].call("search_emails", {"query": "in:sent"}, as_="john@acme.com")
+    assert from_john[0]["subject"] in r.text
+    old = EnvRun(Environment.from_dict({"name": "w", "servers": {"gmail": {"version": "2026-09-25.1"}}}))
+    assert list(old.instances["gmail"].state["mailboxes"]) == ["alex@acme.com"]

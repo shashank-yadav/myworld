@@ -152,3 +152,17 @@ def test_single_agent_envs_still_work():
     sha = c.get("/instances/m-github/state").json()["state"]["repos"]["acme/api"]["pulls"]["4"]["merge_commit_sha"]
     graded = c.post("/envs/m/submit", json={"answer": f"Merged, commit {sha}"}).json()
     assert graded["passed"] and graded["reward"] == 1.0
+
+
+def test_calendar_emails_dont_stand_in_for_the_conversation(world):
+    c, alex, john = world
+    alex_invites_directly = alex.call("calendar", "create-event", summary="Q4 planning", start="2026-09-22T10:00:00",
+                                      end="2026-09-22T10:30:00", attendees=[{"email": "john@acme.com"}])[1]
+    _, found = john.call("gmail", "search_emails", query="subject:Invitation")
+    assert "Q4 planning" in found, "John's agent sees the invite in his inbox"
+    john.call("calendar", "respond-to-event", eventId=alex_invites_directly["event"]["id"], response="accepted")
+    _, found = alex.call("gmail", "search_emails", query="from:john@acme.com")
+    assert "Accepted: Q4 planning" in found
+    checks = {x["name"]: x["passed"] for x in c.get("/envs/w/grade").json()["checks"]}
+    assert not checks["John received Alex's proposal"] and not checks["Alex received John's reply"], \
+        "skipping the emails isn't rewarded just because Calendar sent some"

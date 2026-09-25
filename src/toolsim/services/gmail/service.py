@@ -2,11 +2,33 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from email.utils import parseaddr
 from typing import Any
 
 from ...core.instance import Instance, Service
-from .model import V1, V2, _addr, _list, _mb, _new_mailbox
+from .model import V1, V2, _addr, _list, _mb, _new_mailbox, _store
+
+
+def _mirror(ctx: Instance, state: dict[str, Any]) -> None:
+    """Seeded mail between people who both have mailboxes is in both: what Alex received from John
+    is in John's Sent, and what Alex sent John is in John's inbox (same Message-ID, own thread ids)."""
+    boxes = state["mailboxes"]
+    have = {e: {m["messageId"] for m in b["messages"].values()} for e, b in boxes.items()}
+    seeded = sorted(((e, m) for e, b in boxes.items() for m in list(b["messages"].values())),
+                    key=lambda x: int(x[1]["internalDate"]))
+    for owner, m in seeded:
+        sender = _addr(m["from"])
+        for who in dict.fromkeys([sender, *(_addr(a) for a in [*m["to"], *m["cc"]])]):
+            if who == owner or who not in boxes or m["messageId"] in have[who]:
+                continue
+            copy = _store(ctx, boxes[who], sender=m["from"], to=m["to"], cc=m["cc"], bcc=[], subject=m["subject"],
+                          body=m["body"], labels=["SENT"] if who == sender else ["INBOX"],
+                          date=dt.datetime.fromtimestamp(int(m["internalDate"]) / 1000, dt.timezone.utc),
+                          thread_key=f"mirror:{owner}:{m['threadId']}", attachments=m["attachments"],
+                          html_body=m.get("htmlBody"))
+            copy["messageId"] = m["messageId"]
+            have[who].add(m["messageId"])
 
 
 class Gmail(Service):
@@ -99,6 +121,7 @@ class Gmail(Service):
                 if addr.rsplit("@", 1)[-1] in state["_domains"] and addr not in state["mailboxes"]:
                     user = {"email": addr, "name": names.get(addr) or addr.split("@")[0].replace(".", " ").title()}
                     state["mailboxes"][addr] = _new_mailbox(ctx, {}, user)
+            _mirror(ctx, state)
         state["_auto_replies"] = list(seed.get("auto_replies", []))
         state["_daily_send_limit"] = int(seed.get("daily_send_limit", 2000))
         state["_ooo_sent"] = []

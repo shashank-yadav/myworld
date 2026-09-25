@@ -1,5 +1,5 @@
 {
- "behavior_sha256": "add25183c02e8425846a66565b53dd130d7278df7ebe9568cef343d451240d6d",
+ "behavior_sha256": "1b5dd1de76f94d63e4b6128e24c9372bd2a88613fa612dc2f5f07c24b84e1b66",
  "changelog": "A company mail system: every known address at the company's domains has a mailbox, so any colleague can have an agent and mail between colleagues lands in both inboxes.",
  "probe_calls": 21,
  "service": "gmail",

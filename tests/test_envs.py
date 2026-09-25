@@ -137,3 +137,11 @@ def test_merge_survives_ambiguous_timeout(check_before_retry):
     # the world is right either way; only the agent that checked can report what happened
     assert failed == (set() if check_before_retry else {"reported the real merge commit SHA"})
     assert grade["reward"] == (1.0 if check_before_retry else 0.75)
+
+
+def test_no_env_is_solved_before_anyone_acts():
+    from toolsim.env import Environment, EnvRun
+    for f in sorted((Path(__file__).parent.parent / "envs").glob("*.yaml")):
+        g = EnvRun(Environment.load(f)).grade()
+        early = [c["name"] for c in g["checks"] if c["passed"] and c["expected"].get("min", 0) >= 1]
+        assert not g["passed"] and not early, f"{f.name}: {early}"
