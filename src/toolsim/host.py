@@ -84,6 +84,7 @@ class HostConfig:
     gateway_passthrough: bool = True          # tunnel other hosts to the internet (False: refuse them)
     gateway_tls_port: int | None = None       # also serve TLS directly (API hosts resolved to the gateway)
     ca_dir: Path | None = None                # where the gateway's CA lives (default ~/.toolsim/ca)
+    store: Path | None = None                 # durable, deduplicated checkpoints and saved runs (toolsim.world.store)
 
 
 def _valid_id(value: str | None, what: str) -> str | None:
@@ -101,6 +102,8 @@ class Host:
         self.env_snapshots: OrderedDict[str, dict[str, Any]] = OrderedDict()
         self._lock = threading.RLock()
         self.gateway_secret = self.config.token or secrets.token_hex(16)  # signs agents' API tokens
+        from .world.store import Store
+        self.store = Store(self.config.store) if self.config.store else None
         self.gateway: Any = None
         if self.config.gateway_port is not None:
             from .gateway import Gateway
@@ -157,7 +160,8 @@ class Host:
         if self.gateway is not None and env.now is None:
             # real clients read the machine's clock: start the world now, and let it run in real time
             env = dataclasses.replace(env, now="wallclock", speed=env.speed if env.time_set else 1.0)
-        run = EnvRun(env, _valid_id(run_id, "environment run id") or f"{env.name}-{uuid.uuid4().hex[:6]}")
+        run = EnvRun(env, _valid_id(run_id, "environment run id") or f"{env.name}-{uuid.uuid4().hex[:6]}",
+                     store=self.store)
         return self._register(run)
 
     def _register(self, run: EnvRun) -> EnvRun:
@@ -556,6 +560,44 @@ def create_app(host: Host | None = None, config: HostConfig | None = None) -> Fa
         except (ValueError, TypeError, KeyError) as e:
             raise bad_request(e) from None
         return {"result": result, "step": len(run.journal)}
+
+    @app.get("/envs/{run_id}/export")
+    def env_export(run_id: str) -> dict[str, Any]:
+        """The whole run as one JSON document (environment, state, journal, checkpoints)."""
+        try:
+            return env_run(run_id).export()
+        except ValueError as e:
+            raise bad_request(e) from None
+
+    @app.post("/envs/import")
+    def env_import(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """{"run": <an export>, "id": "..."}: continue a run exported elsewhere."""
+        try:
+            run = EnvRun.from_export(body.get("run") or {}, _valid_id(body.get("id"), "run id"), store=host.store)
+            host._register(run)
+        except (ValueError, KeyError, TypeError) as e:
+            raise bad_request(e) from None
+        return describe_env(request, run)
+
+    @app.post("/envs/{run_id}/save")
+    def env_save(run_id: str, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        if host.store is None:
+            raise HTTPException(400, "no store: start the host with --store PATH")
+        name = _valid_id(str(body.get("name") or ""), "name")
+        if not name:
+            raise bad_request(ValueError("name is required"))
+        return {"name": name, "ref": env_run(run_id).save(host.store, name), "store": host.store.stats()}
+
+    @app.post("/envs/load")
+    def env_load(request: Request, body: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        if host.store is None:
+            raise HTTPException(400, "no store: start the host with --store PATH")
+        try:
+            run = EnvRun.load(host.store, str(body.get("name") or ""), _valid_id(body.get("id"), "run id"))
+            host._register(run)
+        except (KeyError, ValueError) as e:
+            raise bad_request(ValueError(f"nothing saved as {body.get('name')!r}") if isinstance(e, KeyError) else e) from None
+        return describe_env(request, run)
 
     @app.get("/envs/{run_id}/components")
     def env_components(run_id: str) -> dict[str, Any]:

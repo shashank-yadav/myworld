@@ -90,6 +90,31 @@ class Environment:
     time_set: bool = False      # whether the spec chose a clock (otherwise a host may apply its default)
     components: dict[str, dict[str, Any]] = field(default_factory=dict)  # directories, databases, remote (toolsim.world)
 
+    def to_dict(self, materialize: bool = False) -> dict[str, Any]:
+        """The spec for this environment (``from_dict`` builds it back). ``materialize`` writes
+        every server's seed inline, so the spec needs no files and regenerates no noise."""
+        servers = {}
+        for s, cfg in self.servers.items():
+            cfg = dict(cfg)
+            if materialize:
+                seed = self.seed_for(s)
+                for k in ("seed_file", "extend", "noise"):
+                    cfg.pop(k, None)
+                if seed is not None:
+                    cfg["seed"] = seed
+            servers[s] = cfg
+        out: dict[str, Any] = {"name": self.name, "task": self.task, "description": self.description,
+                               "servers": servers, "faults": list(self.faults), "checks": list(self.checks),
+                               "rng_seed": self.rng_seed, "agents": dict(self.agents), "events": list(self.events)}
+        for key, value in (("now", self.now), ("ambient", self.ambient)):
+            if value is not None:
+                out[key] = value
+        if self.time_set or self.speed is not None:
+            out["time"] = "virtual" if self.speed is None else {"speed": self.speed}
+        if self.components:
+            out["components"] = dict(self.components)
+        return out
+
     @classmethod
     def load(cls, path: str | Path) -> Environment:
         path = Path(path)
@@ -537,7 +562,8 @@ class EnvRun:
     are its components; every call, injected event, mutation and passage of time goes into its
     ``journal``; ``checkpoint``/``branch``/``replay``/``diff``/``mutate`` work on the whole thing."""
 
-    def __init__(self, env: Environment, run_id: str | None = None, *, clone_of: EnvRun | None = None):
+    def __init__(self, env: Environment, run_id: str | None = None, *, clone_of: EnvRun | None = None,
+                 store: Any = None):
         from .services import get_service
         from .world import ServiceComponent, World, build
         if env.now == WALLCLOCK:
@@ -557,6 +583,7 @@ class EnvRun:
                           for s in env.servers}
         self._server_of = {id(i): s for s, i in self.instances.items()}
         self.world = World(lock=self.lock, now=lambda: self.clock.now.isoformat())
+        self.store = store if store is not None else (clone_of.store if clone_of is not None else None)
         for s, inst in self.instances.items():
             self.world.add(s, ServiceComponent(inst))
         for name, spec in env.components.items():  # others' own directories and databases are cloned, never shared
@@ -734,9 +761,13 @@ class EnvRun:
     # -- checkpoints, branches, replays -------------------------------------------------------
 
     def checkpoint(self) -> int:
-        """Remember this instant; returns its step (the journal's length)."""
+        """Remember this instant; returns its step (the journal's length). With a store, the
+        checkpoint is a reference into it, sharing everything that didn't change."""
         with self.lock:
-            return self.world.checkpoint(self.snapshot())
+            snap = self.snapshot()
+            if self.store is not None:
+                return self.world.checkpoint({"$ref": self.store.put(snap)})
+            return self.world.checkpoint(snap)
 
     def branch(self, step: int | None = None, run_id: str | None = None) -> EnvRun:
         """An independent run as this one was after ``step`` journal entries (default: now):
@@ -809,6 +840,46 @@ class EnvRun:
             self.submit(e["answer"])
         return None
 
+    # -- moving and keeping runs ---------------------------------------------------------------------
+
+    def export(self) -> dict[str, Any]:
+        """Everything needed to rebuild this run elsewhere: its environment (seeds inline), state,
+        journal and checkpoints. JSON-able; see ``EnvRun.from_export``."""
+        with self.lock:
+            if any(c.get("path") for c in self.env.components.values()):
+                raise ValueError("runs with components at local paths can't move; use unnamed components")
+            return {"format": "toolsim.run/1", "id": self.id, "env": self.env.to_dict(materialize=True),
+                    "snapshot": self.snapshot(), "journal": copy.deepcopy(self.world.journal),
+                    "checkpoints": {str(k): (None if v is None else self._checkpoint(k))
+                                    for k, v in self.world.checkpoints.items()},
+                    "initial_components": copy.deepcopy(self._initial_components)}
+
+    @classmethod
+    def from_export(cls, doc: dict[str, Any], run_id: str | None = None, store: Any = None) -> EnvRun:
+        if doc.get("format") != "toolsim.run/1":
+            raise ValueError("not an exported toolsim run")
+        run = cls(Environment.from_dict(doc["env"], base_dir=None), run_id or doc["id"], store=store)
+        with run.lock:
+            run.restore(doc["snapshot"])
+            run.world.journal[:] = copy.deepcopy(doc["journal"])
+            run.world.checkpoints = {int(k): v for k, v in doc["checkpoints"].items()}
+            run._initial_components = copy.deepcopy(doc.get("initial_components") or {})
+            if store is not None:
+                run.world.checkpoints = {k: v if v is None else {"$ref": store.put(v)}
+                                         for k, v in run.world.checkpoints.items()}
+        return run
+
+    def save(self, store: Any, name: str) -> str:
+        """Keep this run in a durable store under ``name``; returns the reference."""
+        ref = store.put(self.export())
+        store.name(name, ref)
+        return ref
+
+    @classmethod
+    def load(cls, store: Any, name: str, run_id: str | None = None) -> EnvRun:
+        ref = name if name.startswith("sha256:") else store.lookup(name)
+        return cls.from_export(store.get(ref), run_id, store=store)
+
     def diff(self, since: int = 0, until: int | None = None) -> dict[str, list[dict[str, Any]]]:
         """What changed in every server and component between two checkpoints (default: since the start)."""
         return self.world.diff(self._checkpoint(since), None if until is None else self._checkpoint(until))
@@ -818,6 +889,8 @@ class EnvRun:
         if step not in self.world.checkpoints:
             raise ValueError(f"no checkpoint at step {step} (have {sorted(self.world.checkpoints)})")
         snap = self.world.checkpoints[step]
+        if isinstance(snap, dict) and set(snap) == {"$ref"}:
+            return self.store.get(snap["$ref"])
         if snap is None:
             fresh = EnvRun(dataclasses.replace(self.env, speed=None), f"{self.id}-start", clone_of=self)
             for n, c in fresh.components.items():

@@ -177,3 +177,41 @@ def test_the_runtime_over_http():
     comps = c.get("/envs/s/components").json()
     assert comps["db"]["kind"] == "sqlite" and comps["gmail"]["mutations"]
     assert c.post("/envs/s/mutate", json={"component": "nope", "op": "x"}).status_code == 400
+
+
+def test_the_store_shares_what_didnt_change_and_keeps_types(tmp_path):
+    from toolsim.world.store import Store
+    st = Store(tmp_path / "w.db")
+    value = {"issues": {4: {"title": "x" * 300}}, "rng": (3, (1, 2), None), "big": ["y" * 300, "z" * 300]}
+    assert st.get(st.put(value)) == value, "integer keys and tuples survive"
+    run = EnvRun(Environment.from_dict({"name": "w", "servers": {"gmail": {}, "github": {}}}), store=st)
+    first = st.put(run.snapshot())
+    before = st.stats()["bytes"]
+    run.instances["gmail"].call("send_email", {"to": ["john@acme.com"], "subject": "x", "body": "."})
+    second = st.put(run.snapshot())
+    added = st.stats()["bytes"] - before
+    assert first != second and added < before / 2, "the github half and most of gmail are shared"
+    cp = run.checkpoint()
+    assert set(run.world.checkpoints[cp]) == {"$ref"}
+    st.close()
+    reopened = Store(tmp_path / "w.db")
+    assert reopened.get(second)["instances"]["github"] == run.snapshot()["instances"]["github"]
+
+
+def test_runs_move_between_hosts_and_survive_restarts(tmp_path):
+    a = TestClient(create_app(config=HostConfig(store=tmp_path / "a.db")))
+    b = TestClient(create_app(config=HostConfig()))
+    a.post("/envs", json={"spec": SPEC, "id": "s"})
+    a.post("/envs/s/mutate", json={"component": "db", "op": "sql",
+                                   "params": {"statement": "UPDATE orders SET status='refunded' WHERE id=1"}})
+    moved = b.post("/envs/import", json={"run": a.get("/envs/s/export").json(), "id": "s2"})
+    assert moved.status_code == 200
+    assert b.get("/envs/s2/journal").json()["steps"] == 1
+    assert b.post("/envs/s2/replay").json()["reproducible"]
+    assert b.get("/envs/s2/components").json()["db"]["state"]["tables"]["orders"][0]["status"] == "refunded"
+    a.post("/envs/s/save", json={"name": "support-demo"})
+    restarted = TestClient(create_app(config=HostConfig(store=tmp_path / "a.db")))
+    loaded = restarted.post("/envs/load", json={"name": "support-demo", "id": "back"})
+    assert loaded.status_code == 200 and restarted.get("/envs/back/journal").json()["steps"] == 1
+    assert restarted.post("/envs/load", json={"name": "nope"}).status_code == 400
+    assert b.post("/envs/s2/save", json={"name": "x"}).status_code == 400, "no store configured"

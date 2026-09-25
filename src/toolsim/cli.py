@@ -159,7 +159,8 @@ def cmd_serve(args: argparse.Namespace) -> None:
                         max_hang_s=args.max_hang, speed=parse_time(args.time), gateway_port=args.gateway,
                         gateway_bind=args.gateway_bind, gateway_passthrough=not args.no_passthrough,
                         gateway_tls_port=args.gateway_tls,
-                        ca_dir=Path(args.ca_dir) if args.ca_dir else None)
+                        ca_dir=Path(args.ca_dir) if args.ca_dir else None,
+                        store=Path(args.store) if args.store else None)
     host = Host(config)
     if host.gateway is not None:
         print(f"gateway: HTTPS_PROXY={host.gateway.url}  CA={host.gateway.ca.cert_path}  "
@@ -239,6 +240,7 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--gateway-tls", type=int, metavar="PORT",
                    help="also serve TLS directly, for clients that ignore proxies (point the API hosts at it)")
     s.add_argument("--ca-dir", help="where the gateway keeps its CA (default ~/.toolsim/ca)")
+    s.add_argument("--store", help="SQLite file for durable checkpoints and saved runs (deduplicated)")
     s.set_defaults(fn=cmd_serve)
 
     s = sub.add_parser("stdio", help="serve one instance over stdio")
