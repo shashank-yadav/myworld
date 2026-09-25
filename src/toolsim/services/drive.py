@@ -47,6 +47,8 @@ EXPORTS = {TYPES["doc"]: {"pdf": "application/pdf", "docx": "application/vnd.ope
            TYPES["slides"]: {"pdf": "application/pdf", "pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation"}}
 ROLES = ["reader", "commenter", "writer", "owner"]
 V1 = "2026-09-25.1"
+V2 = "2026-09-25.2"
+SEARCH_LAG = {"files": 60}  # seconds until Drive search sees new, renamed or edited files
 
 
 def _err(code: int, message: str, reason: str) -> ToolError:
@@ -67,7 +69,9 @@ class Drive(Service):
     title = "Google Drive"
     description = "Simulated Google Drive. Behaves like the Google Workspace MCP server's Drive tools; nothing is really shared."
     versions = {"2026-09-25": "Initial release: 12 Drive tools modeled on taylorwilsdon/google_workspace_mcp.",
-                V1: "Sheets (6 tools: cells, A1 ranges, formulas, grid limits) and Docs (5 tools) from the same server."}
+                V1: "Sheets (6 tools: cells, A1 ranges, formulas, grid limits) and Docs (5 tools) from the same server.",
+                V2: "Search is eventually consistent: new, renamed and edited files reach search_drive_files, "
+                    "search_docs and list_spreadsheets about a minute later (listing a folder is immediate)."}
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -112,6 +116,12 @@ class Drive(Service):
             c("modify_doc_text", {"document_id": doc["id"], "start_index": 500, "text": "x"})
             c("create_doc", {"title": "Retro", "content": "What went well"})
             c("get_doc_content", {"document_id": f["id"]})
+        if ctx.at_least(V2):
+            new = c("create_drive_file", {"file_name": "incident-review.txt", "content": "timeline", "folder_id": "root"})
+            c("search_drive_files", {"query": "name contains 'incident'"})
+            c("list_drive_items", {})
+            ctx.advance(90)
+            c("search_drive_files", {"query": "name contains 'incident'"})
 
     def default_seed(self) -> dict[str, Any]:
         return {
@@ -139,6 +149,8 @@ class Drive(Service):
         me = (seed.get("user") or {}).get("email", "alex@acme.com")
         state: dict[str, Any] = {"me": me, "domain": seed.get("domain", me.split("@")[1]),
                                  "policy": {"external_sharing": True, **(seed.get("policy") or {})}, "files": {}}
+        if ctx.at_least(V2):
+            state["_search_lag"] = {**SEARCH_LAG, **(seed.get("search_lag") or {})}
         root = _new_file(ctx, state, "My Drive", FOLDER, None, owner=me, fid="root")
         root["parents"] = []
         state["roots"] = {me: "root"}
@@ -361,7 +373,7 @@ def search_drive_files(ctx: Instance,
                        drive_id: Annotated[str | None, "Shared drive ID to search"] = None,
                        file_type: Annotated[Literal["doc", "sheet", "slides", "folder", "pdf"] | None, "Restrict to a file type"] = None) -> str:
     """Search for files and folders within a user's Google Drive, including shared drives"""
-    s = ctx.state
+    s = ctx.search_view("files")
     tree = _drive_query(s, query)
     explicit_trash = "trashed" in query
     hits = [f for f in s["files"].values() if f["id"] != "root" and _my_role(s, f)
@@ -905,7 +917,7 @@ def _spreadsheet(ctx: Instance, fid: str, need: str = "reader") -> dict[str, Any
 def list_spreadsheets(ctx: Instance, user_google_email: EMAIL = None,
                       max_results: Annotated[int | None, "Maximum number of spreadsheets to return (default 25)"] = 25) -> str:
     """Lists spreadsheets from Google Drive that the user has access to"""
-    s = ctx.state
+    s = ctx.search_view("files")
     files = sorted((f for f in s["files"].values() if f["mimeType"] == TYPES["sheet"] and not f["trashed"] and _my_role(s, f)),
                    key=lambda f: f["modifiedTime"], reverse=True)[: max(1, max_results or 25)]
     if not files:
@@ -1036,7 +1048,7 @@ def search_docs(ctx: Instance, query: Annotated[str, "Text to search for in docu
                 user_google_email: EMAIL = None,
                 page_size: Annotated[int | None, "Maximum number of results (default 10)"] = 10) -> str:
     """Searches for Google Docs by name using Drive API"""
-    s = ctx.state
+    s = ctx.search_view("files")
     hits = sorted((f for f in s["files"].values() if f["mimeType"] == TYPES["doc"] and not f["trashed"] and _my_role(s, f)
                    and query.lower() in f["name"].lower()), key=lambda f: f["modifiedTime"], reverse=True)
     hits = hits[: max(1, page_size or 10)]

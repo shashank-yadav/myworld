@@ -181,6 +181,7 @@ class Instance:
             self.calls: list[dict[str, Any]] = []
             self.events: list[dict[str, Any]] = []  # world events applied to this instance
             self.pending: list[dict[str, Any]] = []  # scheduled world actions (see schedule())
+            self.history: list[tuple[str, Any]] = []  # (time of a write, state before it), for lagging search
             self.faults = parse_faults(self.fault_specs)
             try:
                 self.state = self.service.initial_state(copy.deepcopy(self.seed), self)
@@ -195,7 +196,7 @@ class Instance:
             return copy.deepcopy({
                 "state": self.state, "clock": self.clock.isoformat(), "seq": self._clock.seq, "counters": self.counters,
                 "rng": self.rng.getstate(), "calls": self.calls, "events": self.events, "pending": self.pending,
-                "faults": [f.to_dict() for f in self.faults],
+                "faults": [f.to_dict() for f in self.faults], "history": self.history,
             })
 
     def restore(self, snap: dict[str, Any]) -> None:
@@ -210,6 +211,7 @@ class Instance:
             self.calls = snap["calls"]
             self.events = snap.get("events", [])
             self.pending = snap.get("pending", [])
+            self.history = [tuple(h) for h in snap.get("history", [])]
             self.faults = [Fault(**f) for f in snap["faults"]]
 
     def set_faults(self, specs: list[dict[str, Any]]) -> None:
@@ -264,6 +266,40 @@ class Instance:
             finally:
                 self.clock = max(now, self.clock)
             ran += 1
+
+    # -- eventually consistent search ---------------------------------------------------------
+
+    def _search_lags(self) -> dict[str, float]:
+        return self.state.get("_search_lag") or {} if isinstance(self.state, dict) else {}
+
+    def _remember(self, before: Any) -> None:
+        """Keep the state as it was before a write, while a lagging search index might still show it."""
+        lags = self._search_lags()
+        if not lags or before is None:
+            return
+        self.history.append((self.clock.isoformat(), before))
+        cutoff = (self.clock - dt.timedelta(seconds=max(lags.values()))).isoformat()
+        while len(self.history) > 1 and self.history[1][0] <= cutoff:
+            self.history.pop(0)
+        if self.history and self.history[0][0] <= cutoff:
+            self.history.pop(0)
+
+    def search_view(self, index: str = "default") -> dict[str, Any]:
+        """The state as a search index sees it: ``lag`` seconds behind (``state["_search_lag"][index]``).
+        New items aren't found yet, edits show their old values, deleted items still turn up. The
+        acting user is the current one."""
+        lag = self._search_lags().get(index, 0)
+        if not lag:
+            return self.state
+        cutoff = (self.clock - dt.timedelta(seconds=lag)).isoformat()
+        before = next((b for t, b in self.history if t > cutoff), None)
+        if before is None:
+            return self.state
+        view = dict(before)
+        key = self.service.actor_key
+        if key and key in self.state:
+            view[key] = self.state[key]
+        return view
 
     def advance(self, seconds: float) -> None:
         self.clock += dt.timedelta(seconds=seconds)
@@ -329,6 +365,8 @@ class Instance:
             if advance:
                 self.advance(1)  # world events take a moment too, and so are strictly ordered in time
             actor = self.resolve_actor(as_)
+            if self._search_lags():
+                self._remember(_clone(self.state))
             with self._acting(actor):
                 try:
                     result = act.fn(self, **(params or {}))
@@ -376,6 +414,8 @@ class Instance:
                 if fault is not None and fault.kind == "duplicate_commit" and not t.read_only:
                     t.fn(self, **validate_args(t, args))  # the proxy retried; the caller never knows
                 record["committed"] = not t.read_only
+                if not t.read_only:
+                    self._remember(before)
                 result = CallResult(self.service.render(value), False, value)
                 if fault is not None and fault.kind == "truncated":
                     cut = max(1, int(len(result.text) * 0.6))

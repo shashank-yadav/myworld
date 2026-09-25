@@ -1,0 +1,841 @@
+{
+ "behavior_sha256": "6e0899a4127af58e8054cfa72ea2a16aa8c7302859876f1be927bc841e8fef1f",
+ "changelog": "JQL search is eventually consistent: new and edited issues reach search about 10 seconds later (jira_get_issue is immediate).",
+ "probe_calls": 33,
+ "service": "jira",
+ "tools": [
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Search Jira issues using JQL (Jira Query Language)",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "expand": {
+      "description": "Fields to expand: 'renderedFields', 'transitions', 'changelog'",
+      "type": "string"
+     },
+     "fields": {
+      "description": "Comma-separated fields to return, or '*all'",
+      "type": "string"
+     },
+     "jql": {
+      "description": "JQL query string (Jira Query Language). Examples: 'project = OPS AND status = \"In Progress\" ORDER BY priority DESC', 'assignee = currentUser() AND updated >= -7d'",
+      "type": "string"
+     },
+     "limit": {
+      "default": 10,
+      "description": "Maximum number of results (1-50)",
+      "type": "integer"
+     },
+     "page_token": {
+      "description": "Pagination token from a previous search result (Cloud only)",
+      "type": "string"
+     },
+     "projects_filter": {
+      "description": "Comma-separated list of project keys to filter results",
+      "type": "string"
+     },
+     "start_at": {
+      "default": 0,
+      "description": "Starting index for pagination (0-based)",
+      "type": "integer"
+     },
+     "use_display_names": {
+      "default": false,
+      "description": "Use human-readable names for custom fields",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "jql"
+    ],
+    "type": "object"
+   },
+   "name": "jira_search"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Get details of a specific Jira issue including its Epic links and relationship information",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "comment_limit": {
+      "default": 10,
+      "description": "Maximum number of comments to include (0 for none)",
+      "type": "integer"
+     },
+     "expand": {
+      "description": "Fields to expand, e.g. 'renderedFields', 'transitions', 'changelog'",
+      "type": "string"
+     },
+     "fields": {
+      "description": "Comma-separated list of fields to return, or '*all'",
+      "type": "string"
+     },
+     "include": {
+      "description": "Extra sections to include",
+      "type": "string"
+     },
+     "issue_key": {
+      "description": "Jira issue key (e.g., 'PROJ-123')",
+      "type": "string"
+     },
+     "properties": {
+      "description": "Comma-separated issue properties to return",
+      "type": "string"
+     },
+     "update_history": {
+      "default": true,
+      "description": "Whether to update the issue view history",
+      "type": "boolean"
+     },
+     "use_display_names": {
+      "default": false,
+      "description": "Use human-readable names for custom fields",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "issue_key"
+    ],
+    "type": "object"
+   },
+   "name": "jira_get_issue"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Create a new Jira issue with optional Epic link or parent for subtasks",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "additional_fields": {
+      "description": "JSON string of additional fields, e.g. '{\"priority\": {\"name\": \"High\"}, \"labels\": [\"x\"], \"parent\": \"PROJ-1\"}'",
+      "type": "string"
+     },
+     "assignee": {
+      "description": "Assignee's user identifier (email, display name, or account ID)",
+      "type": "string"
+     },
+     "components": {
+      "description": "Comma-separated list of component names",
+      "type": "string"
+     },
+     "description": {
+      "description": "Issue description in Markdown",
+      "type": "string"
+     },
+     "issue_type": {
+      "description": "Issue type (e.g. 'Task', 'Bug', 'Story', 'Epic', 'Subtask')",
+      "type": "string"
+     },
+     "project_key": {
+      "description": "The JIRA project key (e.g. 'PROJ', 'DEV', 'SUPPORT')",
+      "type": "string"
+     },
+     "summary": {
+      "description": "Summary/title of the issue",
+      "type": "string"
+     }
+    },
+    "required": [
+     "project_key",
+     "summary",
+     "issue_type"
+    ],
+    "type": "object"
+   },
+   "name": "jira_create_issue"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Create multiple Jira issues in a batch",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "issues": {
+      "description": "JSON array string of issue objects: [{project_key, summary, issue_type, description?, assignee?, components?}]",
+      "type": "string"
+     },
+     "validate_only": {
+      "default": false,
+      "description": "If true, only validates the issues without creating them",
+      "type": "boolean"
+     }
+    },
+    "required": [
+     "issues"
+    ],
+    "type": "object"
+   },
+   "name": "jira_batch_create_issues"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Update an existing Jira issue including changing status, adding Epic links, updating fields, etc.",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "additional_fields": {
+      "description": "JSON string of additional fields to update",
+      "type": "string"
+     },
+     "attachments": {
+      "description": "Comma-separated file paths to attach",
+      "type": "string"
+     },
+     "attachments_base64": {
+      "description": "JSON array of base64 attachments",
+      "type": "string"
+     },
+     "comment": {
+      "description": "Comment to add as part of the update",
+      "type": "string"
+     },
+     "comment_visibility": {
+      "description": "JSON visibility restriction for the comment",
+      "type": "string"
+     },
+     "components": {
+      "description": "Comma-separated list of component names",
+      "type": "string"
+     },
+     "fields": {
+      "description": "JSON string of fields to update, e.g. '{\"summary\": \"New title\", \"priority\": {\"name\": \"High\"}}'",
+      "type": "string"
+     },
+     "issue_key": {
+      "description": "Jira issue key (e.g., 'PROJ-123')",
+      "type": "string"
+     },
+     "return_fields": {
+      "default": "*all",
+      "description": "Fields to return",
+      "type": "string"
+     },
+     "transition": {
+      "description": "Transition name or ID to apply as part of the update",
+      "type": "string"
+     },
+     "worklog": {
+      "description": "Time to log, e.g. '1h 30m'",
+      "type": "string"
+     },
+     "worklog_started": {
+      "description": "ISO start time for the worklog",
+      "type": "string"
+     }
+    },
+    "required": [
+     "issue_key"
+    ],
+    "type": "object"
+   },
+   "name": "jira_update_issue"
+  },
+  {
+   "annotations": {
+    "destructiveHint": true,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Delete an existing Jira issue",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "issue_key": {
+      "description": "Jira issue key (e.g. PROJ-123)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "issue_key"
+    ],
+    "type": "object"
+   },
+   "name": "jira_delete_issue"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Assign or unassign a Jira issue",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "assignee": {
+      "description": "User to assign (email, display name, or account ID). Omit to unassign.",
+      "type": "string"
+     },
+     "issue_key": {
+      "description": "Jira issue key (e.g., 'PROJ-123')",
+      "type": "string"
+     }
+    },
+    "required": [
+     "issue_key"
+    ],
+    "type": "object"
+   },
+   "name": "jira_assign_issue"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Transition a Jira issue to a new status",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "comment": {
+      "description": "Comment to add during the transition",
+      "type": "string"
+     },
+     "fields": {
+      "description": "JSON string of fields to update during the transition",
+      "type": "string"
+     },
+     "issue_key": {
+      "description": "Jira issue key (e.g., 'PROJ-123')",
+      "type": "string"
+     },
+     "transition_id": {
+      "description": "ID of the transition to perform. Use jira_get_transitions to find valid IDs",
+      "type": "string"
+     }
+    },
+    "required": [
+     "issue_key",
+     "transition_id"
+    ],
+    "type": "object"
+   },
+   "name": "jira_transition_issue"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Get available status transitions for a Jira issue",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "issue_key": {
+      "description": "Jira issue key (e.g., 'PROJ-123')",
+      "type": "string"
+     }
+    },
+    "required": [
+     "issue_key"
+    ],
+    "type": "object"
+   },
+   "name": "jira_get_transitions"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Add a comment to a Jira issue",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "body": {
+      "description": "Comment text in Markdown format",
+      "type": "string"
+     },
+     "issue_key": {
+      "description": "Jira issue key (e.g., 'PROJ-123')",
+      "type": "string"
+     },
+     "public": {
+      "description": "JSM/Service Desk only: true = customer-visible",
+      "type": "boolean"
+     },
+     "visibility": {
+      "description": "JSON string for restricted comments",
+      "type": "string"
+     }
+    },
+    "required": [
+     "issue_key",
+     "body"
+    ],
+    "type": "object"
+   },
+   "name": "jira_add_comment"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Add a worklog entry to a Jira issue",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "comment": {
+      "description": "Worklog comment in Markdown",
+      "type": "string"
+     },
+     "issue_key": {
+      "description": "Jira issue key (e.g., 'PROJ-123')",
+      "type": "string"
+     },
+     "original_estimate": {
+      "description": "New original estimate value",
+      "type": "string"
+     },
+     "remaining_estimate": {
+      "description": "New remaining estimate value",
+      "type": "string"
+     },
+     "started": {
+      "description": "Start time in ISO format (defaults to now)",
+      "type": "string"
+     },
+     "time_spent": {
+      "description": "Time spent, e.g. '1h 30m', '1d', '30m', '4h'",
+      "type": "string"
+     }
+    },
+    "required": [
+     "issue_key",
+     "time_spent"
+    ],
+    "type": "object"
+   },
+   "name": "jira_add_worklog"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Get all Jira projects accessible to the current user",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "include_archived": {
+      "default": false,
+      "description": "Whether to include archived projects",
+      "type": "boolean"
+     }
+    },
+    "type": "object"
+   },
+   "name": "jira_get_all_projects"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Get all issues for a specific Jira project",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "limit": {
+      "default": 10,
+      "description": "Maximum number of results (1-50)",
+      "type": "integer"
+     },
+     "project_key": {
+      "description": "The project key",
+      "type": "string"
+     },
+     "start_at": {
+      "default": 0,
+      "description": "Starting index for pagination (0-based)",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "project_key"
+    ],
+    "type": "object"
+   },
+   "name": "jira_get_project_issues"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Create a link between two Jira issues",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "comment": {
+      "description": "Optional comment to add to the link",
+      "type": "string"
+     },
+     "inward_issue_key": {
+      "description": "The key of the inward issue (e.g., 'PROJ-123')",
+      "type": "string"
+     },
+     "link_type": {
+      "description": "The type of link, e.g. 'Blocks', 'Relates', 'Duplicate', 'Cloners'",
+      "type": "string"
+     },
+     "outward_issue_key": {
+      "description": "The key of the outward issue (e.g., 'PROJ-456')",
+      "type": "string"
+     }
+    },
+    "required": [
+     "link_type",
+     "inward_issue_key",
+     "outward_issue_key"
+    ],
+    "type": "object"
+   },
+   "name": "jira_create_issue_link"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Link an existing issue to an epic",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "epic_key": {
+      "description": "The key of the epic to link to (e.g., 'PROJ-456')",
+      "type": "string"
+     },
+     "issue_key": {
+      "description": "The key of the issue to link (e.g., 'PROJ-123')",
+      "type": "string"
+     }
+    },
+    "required": [
+     "issue_key",
+     "epic_key"
+    ],
+    "type": "object"
+   },
+   "name": "jira_link_to_epic"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Retrieve profile information for a specific Jira user",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "user_identifier": {
+      "description": "Identifier for the user (email, display name, or account ID)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "user_identifier"
+    ],
+    "type": "object"
+   },
+   "name": "jira_get_user_profile"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Get jira agile boards by name, project key, or type",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "board_name": {
+      "description": "(Optional) The name of board, support fuzzy search",
+      "type": "string"
+     },
+     "board_type": {
+      "description": "(Optional) The type of jira board (e.g., 'scrum', 'kanban')",
+      "type": "string"
+     },
+     "limit": {
+      "default": 10,
+      "description": "Maximum number of results (1-50)",
+      "type": "integer"
+     },
+     "project_key": {
+      "description": "(Optional) Jira project key (e.g., 'PROJ-123')",
+      "type": "string"
+     },
+     "start_at": {
+      "default": 0,
+      "description": "Starting index for pagination (0-based)",
+      "type": "integer"
+     }
+    },
+    "type": "object"
+   },
+   "name": "jira_get_agile_boards"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Get all issues linked to a specific board filtered by JQL",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "board_id": {
+      "description": "The id of the board (e.g., '1001')",
+      "type": "string"
+     },
+     "expand": {
+      "default": "version",
+      "description": "Optional fields to expand in the response (e.g., 'changelog')",
+      "type": "string"
+     },
+     "fields": {
+      "description": "Comma-separated fields to return, or '*all'",
+      "type": "string"
+     },
+     "jql": {
+      "description": "JQL query string (Jira Query Language). Examples: 'assignee = currentUser() AND status = \"In Progress\"'",
+      "type": "string"
+     },
+     "limit": {
+      "default": 10,
+      "description": "Maximum number of results (1-50)",
+      "type": "integer"
+     },
+     "start_at": {
+      "default": 0,
+      "description": "Starting index for pagination (0-based)",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "board_id",
+     "jql"
+    ],
+    "type": "object"
+   },
+   "name": "jira_get_board_issues"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Get jira sprints from board by state",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "board_id": {
+      "description": "The id of board (e.g., '1000')",
+      "type": "string"
+     },
+     "limit": {
+      "default": 10,
+      "description": "Maximum number of results (1-50)",
+      "type": "integer"
+     },
+     "start_at": {
+      "default": 0,
+      "description": "Starting index for pagination (0-based)",
+      "type": "integer"
+     },
+     "state": {
+      "description": "Sprint state (e.g., 'active', 'future', 'closed')",
+      "type": "string"
+     }
+    },
+    "required": [
+     "board_id"
+    ],
+    "type": "object"
+   },
+   "name": "jira_get_sprints_from_board"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": true,
+    "openWorldHint": true,
+    "readOnlyHint": true
+   },
+   "description": "Get jira issues from sprint",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "fields": {
+      "description": "Comma-separated fields to return, or '*all'",
+      "type": "string"
+     },
+     "limit": {
+      "default": 10,
+      "description": "Maximum number of results (1-50)",
+      "type": "integer"
+     },
+     "sprint_id": {
+      "description": "The id of sprint (e.g., '10001')",
+      "type": "string"
+     },
+     "start_at": {
+      "default": 0,
+      "description": "Starting index for pagination (0-based)",
+      "type": "integer"
+     }
+    },
+    "required": [
+     "sprint_id"
+    ],
+    "type": "object"
+   },
+   "name": "jira_get_sprint_issues"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Create Jira sprint for a board",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "board_id": {
+      "description": "The id of board (e.g., '1000')",
+      "type": "string"
+     },
+     "end_date": {
+      "description": "End time for sprint (ISO 8601 format)",
+      "type": "string"
+     },
+     "goal": {
+      "description": "(Optional) Goal of the sprint",
+      "type": "string"
+     },
+     "sprint_name": {
+      "description": "Name of the sprint (e.g., 'Sprint 1')",
+      "type": "string"
+     },
+     "start_date": {
+      "description": "Start time for sprint (ISO 8601 format)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "board_id",
+     "sprint_name",
+     "start_date",
+     "end_date"
+    ],
+    "type": "object"
+   },
+   "name": "jira_create_sprint"
+  },
+  {
+   "annotations": {
+    "destructiveHint": false,
+    "idempotentHint": false,
+    "openWorldHint": true,
+    "readOnlyHint": false
+   },
+   "description": "Update jira sprint",
+   "inputSchema": {
+    "additionalProperties": false,
+    "properties": {
+     "end_date": {
+      "description": "(Optional) New end date for the sprint",
+      "type": "string"
+     },
+     "goal": {
+      "description": "(Optional) New goal for the sprint",
+      "type": "string"
+     },
+     "move_incomplete_to": {
+      "description": "(Optional) When closing: id of a future sprint for unfinished issues (default: the backlog)",
+      "type": "string"
+     },
+     "sprint_id": {
+      "description": "The id of sprint (e.g., '10001')",
+      "type": "string"
+     },
+     "sprint_name": {
+      "description": "(Optional) New name for the sprint",
+      "type": "string"
+     },
+     "start_date": {
+      "description": "(Optional) New start date for the sprint",
+      "type": "string"
+     },
+     "state": {
+      "description": "(Optional) New state for the sprint (future|active|closed)",
+      "type": "string"
+     }
+    },
+    "required": [
+     "sprint_id"
+    ],
+    "type": "object"
+   },
+   "name": "jira_update_sprint"
+  }
+ ],
+ "version": "2026-09-25.2"
+}

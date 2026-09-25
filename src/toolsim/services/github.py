@@ -46,6 +46,8 @@ from ..core.tools import ToolError, action, tool
 
 API = "https://api.github.com"
 V1 = "2026-09-25.1"
+V2 = "2026-09-25.2"
+SEARCH_LAG = {"issues": 60, "repos": 60, "code": 300}  # seconds until the search index catches up
 CLOSING = re.compile(r"\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s*:?\s+#(\d+)\b", re.I)
 
 
@@ -74,7 +76,9 @@ class GitHub(Service):
 
     versions = {"2026-09-25": "Initial release: 26 tools modeled on the reference GitHub MCP server.",
                 V1: "Protected branches reject direct pushes, required approving reviews, closing keywords close "
-                    "issues on merge, simulated CI runs on every push."}
+                    "issues on merge, simulated CI runs on every push.",
+                V2: "Search is eventually consistent, like GitHub's: issues/PRs and repos show up in search about "
+                    "a minute after they change, code about five minutes (the list/get tools are immediate)."}
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -118,6 +122,13 @@ class GitHub(Service):
                              "files": [{"path": "tests/test_x.py", "content": "def test_x():\n    assert False\n"}]})
             ctx.advance(300)
             c("get_pull_request_status", {**o, "pull_number": 4})
+        if ctx.at_least(V2):
+            c("create_issue", {**o, "title": "Webhook retries exhaust connection pool", "labels": ["bug"]})
+            c("search_issues", {"q": "repo:acme/api webhook retries"})
+            c("list_issues", {**o, "state": "open"})
+            ctx.advance(90)
+            c("search_issues", {"q": "repo:acme/api webhook retries"})
+            c("search_code", {"q": "rotate repo:acme/api"})
 
     def default_seed(self) -> dict[str, Any]:
         retry_v1 = ("import random, time\n\n\ndef backoff(attempt: int) -> float:\n"
@@ -211,6 +222,8 @@ class GitHub(Service):
                         _comment(ctx, repo, pr["number"], c.get("author", state["viewer"]), c["body"])
         if ctx.at_least(V1):
             state["_v1"] = True
+        if ctx.at_least(V2):
+            state["_search_lag"] = {**SEARCH_LAG, **(seed.get("search_lag") or {})}
         return state
 
     actor_key = "viewer"
@@ -700,7 +713,7 @@ def search_repositories(ctx: Instance,
                         page: Annotated[int | None, "Page number for pagination (default: 1)"] = None,
                         perPage: Annotated[int | None, "Number of results per page (default: 30, max: 100)"] = None) -> dict[str, Any]:
     """Search for GitHub repositories"""
-    s = ctx.state
+    s = ctx.search_view("repos")
     quals, words = _search_terms(query)
     hits = []
     for r in s["repos"].values():
@@ -881,7 +894,7 @@ def search_code(ctx: Instance,
                 per_page: Annotated[int | None, "Results per page (max 100)"] = None,
                 page: Annotated[int | None, "Page number"] = None) -> dict[str, Any]:
     """Search for code across GitHub repositories (default branches)"""
-    s = ctx.state
+    s = ctx.search_view("code")
     quals, words = _search_terms(q)
     if not words:
         raise _unprocessable("Validation Failed", [{"resource": "Search", "field": "q", "code": "missing"}])
@@ -914,7 +927,7 @@ def search_issues(ctx: Instance,
                   per_page: Annotated[int | None, "Results per page (max 100)"] = None,
                   page: Annotated[int | None, "Page number"] = None) -> dict[str, Any]:
     """Search for issues and pull requests across GitHub repositories"""
-    s = ctx.state
+    s = ctx.search_view("issues")
     quals, words = _search_terms(q)
     hits = []
     for r in s["repos"].values():

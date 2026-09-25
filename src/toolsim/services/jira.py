@@ -41,6 +41,8 @@ from ..core.tools import ToolError, action, tool
 
 SITE = "https://acme.atlassian.net"
 V1 = "2026-09-25.1"
+V2 = "2026-09-25.2"
+SEARCH_LAG = {"issues": 10}  # seconds until JQL search reflects a change
 STATUSES = {"To Do": "new", "In Progress": "indeterminate", "In Review": "indeterminate", "Done": "done"}
 # the workflow: from-status -> [(transition id, name, to-status)]
 WORKFLOW = {
@@ -69,7 +71,9 @@ class Jira(Service):
     description = "Simulated Jira Cloud site. Behaves like the mcp-atlassian Jira tools; nothing is really changed."
 
     versions = {"2026-09-25": "Initial release: 16 tools modeled on sooperset/mcp-atlassian (Jira).",
-                V1: "Agile boards and sprints (6 tools), sprint field and sprint functions in JQL."}
+                V1: "Agile boards and sprints (6 tools), sprint field and sprint functions in JQL.",
+                V2: "JQL search is eventually consistent: new and edited issues reach search about 10 seconds "
+                    "later (jira_get_issue is immediate)."}
 
     def probe(self, ctx: Instance) -> None:
         c = ctx.call
@@ -103,6 +107,14 @@ class Jira(Service):
             c("jira_create_sprint", {"board_id": board, "sprint_name": "OPS Sprint 9", "start_date": "2026-10-12",
                                      "end_date": "2026-10-26", "goal": "Cost review"})
             c("jira_get_sprints_from_board", {"board_id": "2"})
+        if ctx.at_least(V2):
+            c("jira_create_issue", {"project_key": "OPS", "summary": "Pager storm from disk alerts", "issue_type": "Bug"})
+            c("jira_search", {"jql": 'project = OPS AND summary ~ "pager storm"'})
+            c("jira_transition_issue", {"issue_key": "OPS-3", "transition_id": "11"})
+            c("jira_search", {"jql": 'key = OPS-3 AND status = "In Progress"'})
+            ctx.advance(15)
+            c("jira_search", {"jql": 'project = OPS AND summary ~ "pager storm"'})
+            c("jira_search", {"jql": 'key = OPS-3 AND status = "In Progress"'})
 
     def default_seed(self) -> dict[str, Any]:
         return {
@@ -145,6 +157,8 @@ class Jira(Service):
         state: dict[str, Any] = {"me": me["account_id"], "users": {}, "projects": {}, "issues": {}, "links": []}
         if ctx.at_least(V1):
             state.update(_v1=True, boards={}, sprints={})
+        if ctx.at_least(V2):
+            state["_search_lag"] = {**SEARCH_LAG, **(seed.get("search_lag") or {})}
         for u in [me, *seed.get("users", [])]:
             state["users"][u["account_id"]] = {"account_id": u["account_id"], "display_name": u["display_name"],
                                                "email": u.get("email"), "active": u.get("active", True)}
@@ -702,7 +716,7 @@ def jira_search(ctx: Instance,
                 page_token: Annotated[str | None, "Pagination token from a previous search result (Cloud only)"] = None,
                 use_display_names: Annotated[bool | None, "Use human-readable names for custom fields"] = False) -> dict[str, Any]:
     """Search Jira issues using JQL (Jira Query Language)"""
-    s = ctx.state
+    s = ctx.search_view("issues")
     q = _JQL(s, jql, ctx.now())
     projects = {p.strip().upper() for p in (projects_filter or "").split(",") if p.strip()}
     hits = [i for i in s["issues"].values() if q.matches(i) and (not projects or i["project"] in projects)]

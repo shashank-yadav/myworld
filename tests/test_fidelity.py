@@ -438,3 +438,53 @@ def test_docs_indices_and_replace():
                                                                          "replace_text": "roadmap"}).text
     assert "not a Google Docs document" in d.call("get_doc_content", {"document_id": fid(d, "Q4 budget")}).text
     assert "read_sheet_values" not in json.dumps(drive(version=V0).list_tools())
+
+
+# -- eventually consistent search (2026-09-25.2) ----------------------------------------------
+
+V2 = "2026-09-25.2"
+
+
+def test_github_search_lags_behind_writes_but_reads_dont():
+    g = gh(version=V2)
+    n = _json(g.call("create_issue", {**O, "title": "Webhook retries exhaust the pool"}))["number"]
+    q = {"q": "repo:acme/api webhook retries"}
+    assert _json(g.call("search_issues", q))["total_count"] == 0, "not indexed yet"
+    assert _json(g.call("get_issue", {**O, "issue_number": n}))["title"].startswith("Webhook"), "reads are immediate"
+    g.call("update_issue", {**O, "issue_number": 1, "state": "closed"})
+    assert _json(g.call("search_issues", {"q": "repo:acme/api is:open hammer"}))["total_count"] == 1, "stale state"
+    g.advance(60)
+    assert _json(g.call("search_issues", q))["total_count"] == 1
+    assert _json(g.call("search_issues", {"q": "repo:acme/api is:open hammer"}))["total_count"] == 0
+    g1 = gh(version=V1)
+    g1.call("create_issue", {**O, "title": "Webhook retries exhaust the pool"})
+    assert _json(g1.call("search_issues", q))["total_count"] == 1, "older versions search instantly"
+
+
+def test_jira_and_drive_search_lag():
+    j = Instance(get_service("jira"), version=V2)
+    j.call("jira_transition_issue", {"issue_key": "OPS-3", "transition_id": "11"})
+    jql = {"jql": 'key = OPS-3 AND status = "In Progress"'}
+    assert keys(j.call("jira_search", jql)) == []
+    assert _json(j.call("jira_get_issue", {"issue_key": "OPS-3"}))["status"]["name"] == "In Progress"
+    j.advance(10)
+    assert keys(j.call("jira_search", jql)) == ["OPS-3"]
+    d = drive(version=V2)
+    d.call("create_drive_file", {"file_name": "incident-review.txt", "content": "x", "folder_id": "root"})
+    assert "No files found" in d.call("search_drive_files", {"query": "incident"}).text
+    assert "incident-review.txt" in d.call("list_drive_items", {}).text
+    d.advance(60)
+    assert "incident-review.txt" in d.call("search_drive_files", {"query": "incident"}).text
+
+
+def test_search_lag_survives_snapshots_and_is_configurable():
+    g = gh(version=V2)
+    snap = g.snapshot()
+    g.call("create_issue", {**O, "title": "Flaky login"})
+    g.restore(snap)
+    g.call("create_issue", {**O, "title": "Flaky login"})
+    assert _json(g.call("search_issues", {"q": "flaky login"}))["total_count"] == 0
+    svc = get_service("github")
+    fast = Instance(svc, {**svc.default_seed(), "search_lag": {"issues": 0}}, version=V2)
+    fast.call("create_issue", {**O, "title": "Flaky login"})
+    assert _json(fast.call("search_issues", {"q": "flaky login"}))["total_count"] == 1
