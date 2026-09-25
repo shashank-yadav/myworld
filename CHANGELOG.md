@@ -17,6 +17,8 @@ Realism gaps closed as new service versions (`2026-09-25.1`; the `2026-09-25` ve
 - **Jira:** 6 agile tools (boards, sprints, sprint issues, create/update sprint), `sprint` in JQL with
   `openSprints()` / `closedSprints()` / `futureSprints()`, Jira's sprint rules.
 - **Drive:** Sheets (cells, A1 ranges, USER_ENTERED vs RAW, formulas, grid limits) and Docs tools.
+- **Noise and ambient activity** (`toolsim.noise`): seeded, realistic volume and distractors for Gmail,
+  Slack, Calendar, GitHub, Jira and Drive, and background activity during a run, for per-episode variety.
 - Core: `ctx.schedule` for delayed world reactions (applied at their due time, included in snapshots);
   `@tool(since=…)` compares same-day revisions correctly.
 

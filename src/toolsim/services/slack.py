@@ -33,6 +33,7 @@ thread (``thread: false`` for top level; DMs reply top level) up to ``times`` ti
 from __future__ import annotations
 
 import base64
+import datetime as dt
 import re
 from typing import Annotated, Any
 
@@ -142,14 +143,15 @@ class Slack(Service):
             }
             state["messages"][cid] = []
             for i, m in enumerate(c.get("messages", [])):
-                ts = _ts(ctx, base + 3600 * (i + 1))
+                ts = _ts(ctx, _seed_time(m, base + 3600 * (i + 1)))
                 msg = _msg(state, m["user"], m["text"], ts)
                 for emoji, users in (m.get("reactions") or {}).items():
                     msg.setdefault("reactions", []).append({"name": emoji, "users": [state["_by_name"][u] for u in users],
                                                             "count": len(users)})
                 state["messages"][cid].append(msg)
                 for j, r in enumerate(m.get("replies", [])):
-                    _add_reply(state, cid, msg, _msg(state, r["user"], r["text"], _ts(ctx, base + 3600 * (i + 1) + 60 * (j + 1))))
+                    at = _seed_time(r, float(ts.split(".")[0]) + 60 * (j + 1))
+                    _add_reply(state, cid, msg, _msg(state, r["user"], r["text"], _ts(ctx, at)))
         return state
 
     actor_key = "acting"  # agents act as the bot by default, or as any workspace member
@@ -200,6 +202,14 @@ def _new_user(ctx: Instance, state: dict[str, Any], u: dict[str, Any]) -> dict[s
     state["users"][uid] = user
     state["_by_name"][u["name"]] = uid
     return user
+
+
+def _seed_time(m: dict[str, Any], default: float) -> float:
+    """A seeded message's time: its ``at`` (ISO 8601) if given, else its place in the channel."""
+    if not m.get("at"):
+        return default
+    t = dt.datetime.fromisoformat(str(m["at"]).replace("Z", "+00:00"))
+    return (t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)).timestamp()
 
 
 def _ts(ctx: Instance, seconds: float | None = None) -> str:

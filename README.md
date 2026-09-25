@@ -171,6 +171,30 @@ and forks include which ones have fired. A harness can also inject events into a
 (`POST /envs/{id}/events`) and let virtual time pass (`POST /envs/{id}/advance`).
 `GET /envs/{id}/timeline` shows agent calls and world events together.
 
+## Volume, distractors and background activity
+
+Real workspaces are noisy, and agents that ace five hand-written items often fail at real volume.
+Turn on generated noise per server, and background activity for the whole run:
+
+```yaml
+servers:
+  gmail: {noise: {emails: 300}}          # newsletters, notifications, receipts, colleague threads, spam
+  slack: {noise: {messages: 400}}        # more people, more channels, threads and reactions
+  calendar: {noise: {density: 0.5}}      # recurring 1:1s, team syncs, meetings, busier colleagues
+  github: {noise: {issues: 60, pulls: 4}}
+  jira: {noise: {issues: 80}}
+  drive: {noise: {files: 50}}            # `noise: true` = realistic defaults
+ambient: {hours: 8, gmail: 6, slack: 20, github: 2, jira: 3, calendar: 1}   # events per hour
+```
+
+- **Distractors:** near-duplicates of the seeded items ("Q4 budget (old)", an older thread with a
+  similar subject, a follow-up issue) that the agent has to tell apart.
+- **Per-episode randomization:** everything comes from `rng_seed`. The same seed rebuilds the same
+  world, and a new seed gives a different but equally plausible one.
+- **Safe for checks:** seeded items keep their ids and numbers. Generated people are new, and
+  generated sent mail only goes to them. Background activity only touches generated items, so
+  checks about the task keep their meaning.
+
 ## Checks
 
 Checks grade the end of a run, against the final **state** (what's true in the world) or the

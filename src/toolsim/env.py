@@ -71,6 +71,7 @@ class Environment:
     agents: dict[str, dict[str, Any]] = field(default_factory=dict)
     now: str | None = None
     events: list[dict[str, Any]] = field(default_factory=list)
+    ambient: dict[str, Any] | None = None  # background activity, generated per rng_seed (see toolsim.noise)
 
     @classmethod
     def load(cls, path: str | Path) -> Environment:
@@ -118,7 +119,7 @@ class Environment:
                    faults=spec.get("faults") or [], checks=spec.get("checks") or [],
                    description=spec.get("description", ""), rng_seed=spec.get("rng_seed", 0), base_dir=base_dir,
                    agents={k: v or {} for k, v in agents.items()}, now=spec.get("now"),
-                   events=list(spec.get("events") or []))
+                   events=list(spec.get("events") or []), ambient=_ambient_spec(spec.get("ambient"), servers))
 
     def agent_servers(self, agent: str) -> list[str]:
         return list(self.agents[agent].get("servers") or self.servers)
@@ -148,7 +149,23 @@ class Environment:
         if cfg.get("extend"):
             from .services import get_service
             base = _merge(base if base is not None else get_service(self.service_for(server)).default_seed(), cfg["extend"])
+        if cfg.get("noise"):
+            from . import noise
+            from .services import get_service
+            base = noise.apply(self.service_for(server), base if base is not None else
+                               get_service(self.service_for(server)).default_seed(), cfg["noise"], self.rng_seed,
+                               str(self.now or DEFAULT_NOW))
         return base
+
+    def world_events(self) -> list[dict[str, Any]]:
+        """The environment's events plus generated background activity for this ``rng_seed``."""
+        if not self.ambient:
+            return list(self.events)
+        from . import noise
+        from .services import get_service
+        seeds = {s: self.seed_for(s) or get_service(self.service_for(s)).default_seed() for s in self.servers}
+        return [*self.events, *noise.ambient(self.ambient, {s: self.service_for(s) for s in self.servers}, seeds,
+                                             self.rng_seed, str(self.now or DEFAULT_NOW))]
 
     def service_for(self, server: str) -> str:
         return self.servers[server].get("service", server)
@@ -236,6 +253,21 @@ def _offset(value: Any, start: dt.datetime) -> dt.datetime:
         return start + dt.timedelta(seconds=float(m.group(1)) * {"s": 1, "m": 60, "h": 3600, "d": 86400}[m.group(2)])
     t = dt.datetime.fromisoformat(v.replace("Z", "+00:00"))
     return t if t.tzinfo else t.replace(tzinfo=dt.timezone.utc)
+
+
+def _ambient_spec(spec: Any, servers: dict[str, Any]) -> dict[str, Any] | None:
+    if not spec:
+        return None
+    if not isinstance(spec, dict):
+        raise ValueError("ambient must be a mapping like {hours: 8, gmail: 6, slack: 20} (events per hour)")
+    for k, v in spec.items():
+        if k == "hours":
+            continue
+        if k not in servers and k not in {(c or {}).get("service", n) for n, c in servers.items()}:
+            raise ValueError(f"ambient: unknown server {k!r}")
+        if not isinstance(v, (int, float)) or v < 0:
+            raise ValueError(f"ambient: {k} must be a number of events per hour")
+    return dict(spec)
 
 
 def _merge(base: dict[str, Any], extra: dict[str, Any]) -> dict[str, Any]:
@@ -338,6 +370,7 @@ class EnvRun:
         self.lock = threading.RLock()  # one lock for the whole world: calls and events never interleave
         self.fired: list[int] = []
         self.matches: dict[int, int] = {}
+        self.events = env.world_events()
         self.instances = {s: Instance(get_service(env.service_for(s)), env.seed_for(s), rng_seed=env.rng_seed,
                                       faults=env.faults_for(s), instance_id=f"{self.id}-{s}",
                                       version=env.version_for(s), clock=self.clock, lock=self.lock, hooks=self)
@@ -383,7 +416,7 @@ class EnvRun:
     # -- world events ------------------------------------------------------------------------
 
     def _fire(self, n: int, source: str) -> None:
-        ev = self.env.events[n]
+        ev = self.events[n]
         self.fired.append(n)
         self.instances[ev["server"]].apply_action(ev["action"], ev.get("params"), as_=ev.get("as"),
                                                   source=f"{ev.get('name') or 'event ' + str(n + 1)} ({source})")
@@ -391,7 +424,7 @@ class EnvRun:
     def _due_by_time(self) -> None:
         for inst in self.instances.values():
             inst.run_due()
-        for n, ev in enumerate(self.env.events):
+        for n, ev in enumerate(self.events):
             if n in self.fired:
                 continue
             if "at" in ev and _offset(ev["at"], self.start) <= self.clock.now:
@@ -402,7 +435,7 @@ class EnvRun:
                 self._fire(n, f"after {ev['after_calls']} calls")
 
     def _matching(self, key: str, server: str, tool: str, agent: str | None, record: dict[str, Any] | None) -> None:
-        for n, ev in enumerate(self.env.events):
+        for n, ev in enumerate(self.events):
             m = ev.get(key)
             if m is None or n in self.fired:
                 continue

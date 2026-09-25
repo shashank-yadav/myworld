@@ -194,6 +194,8 @@ class GitHub(Service):
                 if kind == "issue":
                     issue = _new_issue(ctx, state, repo, x["title"], x.get("body"), x.get("author", state["viewer"]),
                                        x.get("labels"), x.get("assignees"))
+                    if x.get("created"):  # imported or generated history
+                        issue["created_at"] = issue["updated_at"] = x["created"]
                     if x.get("state") == "closed":
                         issue["state"], issue["closed_at"] = "closed", ctx.now().isoformat()
                     for c in x.get("comments", []):
@@ -201,6 +203,8 @@ class GitHub(Service):
                 else:
                     pr = _new_pull(ctx, state, repo, x["title"], x.get("body"), x["head"], x["base"],
                                    x.get("author", state["viewer"]), x.get("draft", False))
+                    if x.get("created"):
+                        repo["issues"][pr["number"]].update(created_at=x["created"], updated_at=x["created"])
                     if x.get("state") == "closed":
                         repo["issues"][pr["number"]].update(state="closed", closed_at=ctx.now().isoformat())
                     for c in x.get("comments", []):
