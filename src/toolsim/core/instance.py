@@ -305,7 +305,7 @@ class Instance:
             self.clock = dt.datetime.fromisoformat(item["due"])  # it happened when it was due, not now
             try:
                 self.apply_action(item["action"], item["params"], as_=item["as"],
-                                  source=f"scheduled: {item['reason'] or item['action']}", advance=False)
+                                  source=f"scheduled: {item['reason'] or item['action']}", advance=False, sync=False)
             except ValueError:
                 log.warning("scheduled %s.%s failed", self.service.name, item["action"], exc_info=True)
             finally:
@@ -437,14 +437,15 @@ class Instance:
             return result
 
     def apply_action(self, name: str, params: dict[str, Any] | None = None, *, as_: str | None = None,
-                     source: str = "event", advance: bool = True) -> Any:
+                     source: str = "event", advance: bool = True, sync: bool = True) -> Any:
         """Make the world change (not an agent call). Raises ValueError on bad actions or params."""
         act = next((a for a in self.service.actions if a.name == name), None)
         if act is None:
             raise ValueError(f"{self.service.name} has no action {name!r}; "
                              f"available: {', '.join(a.name for a in self.service.actions) or 'none'}")
         with self.lock:
-            self._clock.sync()
+            if sync:  # a scheduled action happens exactly when it was due, not when the wall clock got there
+                self._clock.sync()
             if advance:
                 self.advance(1)  # world events take a moment too, and so are strictly ordered in time
             actor = self.resolve_actor(as_)

@@ -126,17 +126,15 @@ def test_branching_at_any_step_and_independence():
 
 
 def test_realtime_runs_replay_deterministically():
-    spec = {**SPEC, "time": {"speed": 1000}}
-    run = EnvRun(Environment.from_dict(spec))
-    g = run.instances["gmail"]
-    g.call("send_email", {"to": ["jhon@acme.com"], "subject": "typo", "body": "."})
-    time.sleep(0.2)  # ~200 simulated seconds: the bounce arrives on its own
-    run.tick()
-    g.call("search_emails", {"query": "from:mailer-daemon"})
-    assert any(e["kind"] == "time" for e in run.journal), "wall time is part of the record"
-    assert run.replay() == []
-    replayed = run.branch()
-    assert replayed.clock.now == run.clock.now or replayed.clock.speed == 1000
+    for _ in range(6):  # wall-clock timing varies run to run; the replay must not
+        run = EnvRun(Environment.from_dict({**SPEC, "time": {"speed": 1000}}))
+        g = run.instances["gmail"]
+        g.call("send_email", {"to": ["jhon@acme.com"], "subject": "typo", "body": "."})
+        time.sleep(0.2)  # ~200 simulated seconds: the bounce arrives on its own
+        run.tick()
+        g.call("search_emails", {"query": "from:mailer-daemon"})
+        assert any(e["kind"] == "time" for e in run.journal), "wall time is part of the record"
+        assert run.replay() == []
 
 
 def test_rest_calls_through_the_gateway_replay_too():
