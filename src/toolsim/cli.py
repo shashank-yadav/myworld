@@ -212,6 +212,18 @@ def _time_arg(v: str) -> str | float:
         return v
 
 
+def cmd_coordinator(args: argparse.Namespace) -> None:
+    import os
+
+    import uvicorn
+
+    from .cluster import Cluster, create_coordinator
+    token = args.token or os.environ.get("TOOLSIM_TOKEN")
+    cluster = Cluster(args.worker, token=args.worker_token or token)
+    print(f"coordinating {len(cluster.workers)} workers: {', '.join(cluster.workers)}")
+    uvicorn.run(create_coordinator(cluster, token), host=args.host, port=args.port, log_level="warning")
+
+
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(prog="toolsim", description="Simulated tools for testing and training AI agents.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -243,6 +255,13 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--store", help="SQLite file for durable checkpoints and saved runs (deduplicated)")
     s.set_defaults(fn=cmd_serve)
 
+    s = sub.add_parser("coordinator", help="route runs across several hosts (workers)")
+    s.add_argument("--worker", action="append", required=True, help="a worker host's URL (repeatable)")
+    s.add_argument("--host", default="127.0.0.1")
+    s.add_argument("--port", type=int, default=8700)
+    s.add_argument("--token", help="require this bearer token (or TOOLSIM_TOKEN)")
+    s.add_argument("--worker-token", help="token for the workers (default: the same)")
+    s.set_defaults(fn=cmd_coordinator)
     s = sub.add_parser("stdio", help="serve one instance over stdio")
     s.add_argument("service")
     s.add_argument("--seed", help="seed file (YAML/JSON)")

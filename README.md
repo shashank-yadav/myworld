@@ -333,8 +333,22 @@ checks:
   - {server: db, state: tables.orders, where: {status: refunded}}
 ```
 
-Over HTTP: `/envs/{id}/journal`, `/checkpoint`, `/branch`, `/replay`, `/diff`, `/mutate`,
-`/components`. Changes made outside the world's API (an agent editing files directly) can't be
+- **Counterfactuals:** `run.counterfactual(step, changes)` branches at `step`, applies changes
+  ("what if John had declined?"), replays the recorded actions that came after, and reports where
+  results diverged and whether the outcome changed. Send `variants` to try several at once.
+- **Machines:** `command` components are driven by shell templates (snapshot, restore, clone, view,
+  `mutate.<op>`), so any backend with a CLI plugs in; `docker` is the ready-made preset (snapshots
+  are image layers). Both, like `remote`, are allowed only in environment files.
+- **Durable, copy-on-write storage:** `toolsim serve --store worlds.db` keeps checkpoints in a
+  content-addressed store where unchanged subtrees are shared, so a checkpoint per step is cheap.
+  `/envs/{id}/save` and `/envs/load` keep runs across restarts; `/envs/{id}/export` and
+  `/envs/import` move them between machines.
+- **Many machines:** `toolsim coordinator --worker URL --worker URL` places runs on the
+  least-loaded host, routes each run's requests to its host (agents talk to their host directly),
+  moves runs (`/envs/{id}/move`) and rebalances (`/cluster/rebalance`).
+
+Over HTTP: `/envs/{id}/journal`, `/checkpoint`, `/branch`, `/counterfactual`, `/replay`, `/diff`,
+`/mutate`, `/components`, `/export`, `/save`; `/envs/import`, `/envs/load`. Changes made outside the world's API (an agent editing files directly) can't be
 replayed, only checkpointed; RL episodes checkpoint after every step when a run has components.
 
 ## Real clients: gog, gh, Hermes, OpenClaw
@@ -407,7 +421,9 @@ State lives in memory in one process: snapshots are for branching, not durabilit
 src/toolsim/
   core/          the engine: instances, clock, tools and validation, faults, MCP
   services/      one package per tool: service, model, tools by area, REST api, world actions, noise, importer
-  world/         the world runtime: components (directory, sqlite, remote protocol), journal, branches, diffs
+  world/         the world runtime: components (directory, sqlite, remote, command/docker), journal,
+                 branches, counterfactuals, diffs, the content-addressed store
+  cluster.py     the coordinator for many hosts
   env.py         environments, runs, checks and grading
   issues.py      the issue library
   noise.py       shared pools for generated worlds; dispatches to each tool's noise.py

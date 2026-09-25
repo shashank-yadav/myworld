@@ -4,6 +4,12 @@ Service behavior is versioned separately by date (`toolsim versions`); this file
 
 ## Unreleased
 
+- **World runtime, continued:** a durable copy-on-write store (`--store`: checkpoints as shared
+  Merkle references, save/load across restarts, export/import); counterfactuals (branch, change,
+  replay the rest, compare outcomes); machine components (`command` templates, `docker` preset);
+  a coordinator for many hosts (placement, routing, moves, rebalancing). Real-time replays are
+  exact: scheduled and timed events fire at their due time.
+
 - **World runtime (`toolsim.world`):** runs are worlds of components with a journal and checkpoints.
   Branch at any step, replay with divergence reports (virtual and real time), structural diffs,
   recorded mutations, and checks on any component. New components: `directory`, `sqlite` and
