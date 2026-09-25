@@ -41,10 +41,13 @@ def test_generation_is_deterministic_and_balanced():
         tasks.generate(1, families=["nope"])
 
 
-def test_hard_tasks_add_flaky_apis_and_stay_solvable():
-    for spec in tasks.generate(12, seed=2, hard=True):
+@pytest.mark.parametrize("family", sorted(tasks.FAMILIES))
+def test_hard_tasks_add_flaky_apis_and_stay_solvable(family):
+    made = [s for s in (tasks.make(family, n, hard=True) for n in range(1, 6)) if s]
+    for spec in made:
         assert spec["issues"][0]["use"] == "flaky_api"
-        assert tasks.validate(spec)["ok"]
+        v = tasks.validate(spec)
+        assert v["ok"], (spec["name"], v)
 
 
 def test_sloppy_archiving_is_caught():

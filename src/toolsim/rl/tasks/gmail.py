@@ -31,7 +31,7 @@ def gmail_reply(rng: random.Random, seed: int) -> Task | None:
             "checks": [
                 {"name": "replied to the right person about it", "server": "gmail", "state": "messages", "weight": 3,
                  "where": {"labelIds": ["SENT"], "to": [addr], "subject~": m["subject"], "body~": key}, "count": 1},
-                {"name": "sent it only once", "server": "gmail", "calls": "send_email", "max": 1},
+                {"name": "sent it only once", "server": "gmail", "calls": "send_email", "committed": True, "max": 1},
                 {"name": "didn't send the reply to anyone else", "server": "gmail", "state": "messages", "must": True,
                  "where": {"labelIds": ["SENT"], "body~": key, "!to": [addr]}, "count": 0}],
             "reference": [_call("gmail__send_email", to=[addr], subject="Re: " + m["subject"],

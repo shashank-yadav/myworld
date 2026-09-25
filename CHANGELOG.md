@@ -4,6 +4,11 @@ Service behavior is versioned separately by date (`toolsim versions`); this file
 
 ## Unreleased
 
+- **Parallel episodes:** `toolsim.rl.EnvPool` (worker processes, batched reset/step with skips) and
+  `toolsim bench` (reference rollouts; ~340 episodes/s on 8 workers).
+- **Tasks:** 20 families; answer checks guard against stuffing (`max_len`, `not`); `calls: "*"` for
+  "changed nothing"; validation also runs an answer-stuffing adversary.
+
 - **Clock modes:** virtual (fast, deterministic; the default) and realtime (follows the wall clock, optionally
   accelerated; events fire between calls). RL episodes get a `wait` tool and `step(..., elapsed=)`.
 - **Layout:** one package per tool (`services/<tool>/`: service, model, tools by area, actions, noise,

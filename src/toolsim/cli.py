@@ -98,6 +98,15 @@ def cmd_tasks(args: argparse.Namespace) -> None:
                   + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())), file=sys.stderr)
 
 
+def cmd_bench(args: argparse.Namespace) -> None:
+    import json
+
+    from .rl import run_references, tasks
+    families = args.families.split(",") if args.families else None
+    specs = tasks.generate(args.n, seed=args.seed, families=families, hard=args.hard, check=False)
+    print(json.dumps(run_references(specs, workers=args.workers), indent=2))
+
+
 def cmd_import(args: argparse.Namespace) -> None:
     import datetime as dt
 
@@ -252,6 +261,14 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--out", help="output file (default: stdout)")
     s.add_argument("--list", action="store_true", help="list task families")
     s.set_defaults(fn=cmd_tasks)
+
+    s = sub.add_parser("bench", help="play generated tasks' reference solutions in parallel; report throughput")
+    s.add_argument("-n", type=int, default=200, help="how many episodes (default 200)")
+    s.add_argument("--workers", type=int, default=None, help="worker processes (default: up to 8)")
+    s.add_argument("--seed", type=int, default=0)
+    s.add_argument("--families", help="comma-separated task families (default: all)")
+    s.add_argument("--hard", action="store_true", help="flaky APIs (the reference solutions retry)")
+    s.set_defaults(fn=cmd_bench)
 
     s = sub.add_parser("versions", help="list service versions and whether each still matches its frozen fingerprint")
     s.set_defaults(fn=cmd_versions)
