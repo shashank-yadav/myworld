@@ -89,6 +89,7 @@ class Environment:
     speed: float | None = None  # None: virtual time (fast, deterministic); 1: real time; 60: a minute per second
     time_set: bool = False      # whether the spec chose a clock (otherwise a host may apply its default)
     components: dict[str, dict[str, Any]] = field(default_factory=dict)  # directories, databases, remote (toolsim.world)
+    graders: list[dict[str, Any]] = field(default_factory=list)  # plug-in graders (toolsim.graders), e.g. a benchmark's own
 
     def to_dict(self, materialize: bool = False) -> dict[str, Any]:
         """The spec for this environment (``from_dict`` builds it back). ``materialize`` writes
@@ -113,6 +114,8 @@ class Environment:
             out["time"] = "virtual" if self.speed is None else {"speed": self.speed}
         if self.components:
             out["components"] = dict(self.components)
+        if self.graders:
+            out["graders"] = list(self.graders)
         return out
 
     @classmethod
@@ -169,6 +172,11 @@ class Environment:
                 raise ValueError(f"check {c.get('name')!r}: weight must be a non-negative number")
         for n, ev in enumerate(spec.get("events") or []):
             _validate_event(ev, n, servers, components)
+        from .graders import grader
+        for g in spec.get("graders") or []:
+            if not isinstance(g, dict) or not g.get("use"):
+                raise ValueError("each grader needs `use: <name>`")
+            grader(g["use"])  # fail fast on unknown graders
         agents = spec.get("agents") or {"agent": {"task": spec.get("task", "")}}
         for name, a in agents.items():
             unknown = set((a or {}).get("servers") or []) - set(servers)
@@ -183,7 +191,8 @@ class Environment:
                    agents={k: v or {} for k, v in agents.items()}, now=spec.get("now"),
                    events=list(spec.get("events") or []), ambient=_ambient_spec(spec.get("ambient"), servers),
                    speed=parse_time(spec.get("time")), time_set="time" in spec,
-                   components={k: dict(v or {}) for k, v in components.items()})
+                   components={k: dict(v or {}) for k, v in components.items()},
+                   graders=[dict(g) for g in spec.get("graders") or []])
 
     def agent_servers(self, agent: str) -> list[str]:
         return list(self.agents[agent].get("servers") or self.servers)
@@ -272,11 +281,25 @@ class Environment:
             results.append({"name": c.get("name") or _describe(c), "passed": ok, "matched": n,
                             "expected": {k: c[k] for k in ("count", "min", "max") if k in c} or {"min": 1},
                             "weight": float(c.get("weight", 1)), "must": bool(c.get("must"))})
+        native = len(results)
+        graded = []
+        if self.graders:
+            from .graders import grader
+            for g in self.graders:
+                out = grader(g["use"])(self, g, worlds, answer)
+                graded.append(out)
+                results += [{"weight": 1.0, "must": False, **r} for r in out.get("checks", [])]
         total = sum(r["weight"] for r in results)
         score = sum(r["weight"] for r in results if r["passed"]) / total if total else 1.0
+        if graded and not native and all("score" in g for g in graded):
+            score = sum(g["score"] for g in graded) / len(graded)  # e.g. a benchmark's own partial credit
+        passed = all(r["passed"] for r in results) and all(g.get("passed", True) for g in graded)
         violated = [r["name"] for r in results if r["must"] and not r["passed"]]
-        return {"environment": self.name, "passed": all(r["passed"] for r in results), "score": score,
-                "reward": 0.0 if violated else score, "violations": violated, "checks": results}
+        out = {"environment": self.name, "passed": passed, "score": score,
+               "reward": 0.0 if violated else score, "violations": violated, "checks": results}
+        for g in graded:
+            out.update(g.get("extra") or {})
+        return out
 
     def _answer_ok(self, spec: dict[str, Any], worlds: dict[str, dict[str, Any]],
                    answer: str | None) -> tuple[bool, dict[str, Any]]:

@@ -133,12 +133,13 @@ class Drive(Service):
         keys = {}
         for f in seed.get("folders", []):
             parent = keys.get(f.get("parent"), "root")
-            keys[f["key"]] = _new_file(ctx, state, f["name"], FOLDER, parent, owner=me)["id"]
+            keys[f["key"]] = _new_file(ctx, state, f["name"], FOLDER, parent, owner=me, fid=f.get("id"))["id"]
         for f in seed.get("files", []):
             owner = f.get("owner", me)
             mime = f.get("mimeType") or TYPES.get(f.get("type", "text"), "text/plain")
             parent = keys.get(f.get("parent"), state["roots"].get(owner))
-            nf = _new_file(ctx, state, f["name"], mime, parent, owner=owner, content=f.get("content"), size=f.get("size"))
+            nf = _new_file(ctx, state, f["name"], mime, parent, owner=owner, content=f.get("content"), size=f.get("size"),
+                           fid=f.get("id"))
             nf["trashed"] = bool(f.get("trashed"))
             if ctx.at_least(V1) and f.get("sheets") and mime == TYPES["sheet"]:
                 nf["sheets"] = [_new_sheet(n, title, body) for n, (title, body) in enumerate(f["sheets"].items())]

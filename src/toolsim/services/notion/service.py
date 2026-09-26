@@ -102,6 +102,9 @@ class Notion(Service):
             parent = {"type": "page_id", "id": keys[p["parent"]]} if p.get("parent") else {"type": "workspace", "id": None}
             team = next((tid for tid, t in state["teams"].items() if t["name"] == p.get("team")), None)
             page = _new_page(ctx, state, p["title"], parent, p.get("content", ""), icon=p.get("icon"), team=team)
+            if p.get("id"):  # a seed may fix the id (e.g. one a task refers to)
+                state["pages"][p["id"]] = state["pages"].pop(page["id"])
+                page["id"], page["url"] = p["id"], page["url"].rsplit("-", 1)[0] + "-" + p["id"]
             page["restricted"] = bool(p.get("restricted"))
             if ctx.at_least(V1) and p.get("access"):
                 if p["access"] not in ACCESS:

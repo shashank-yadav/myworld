@@ -1,0 +1,1793 @@
+{
+ "kept": 244,
+ "skipped": 356,
+ "by_domain": {
+  "sales": 2,
+  "marketing": 73,
+  "operations": 27,
+  "finance": 73,
+  "hr": 69
+ },
+ "skipped_tasks": [
+  {
+   "task": "sales.multi_hop_lookup",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.negative_selection",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.recency_selection",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.priority_selection",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.format_ambiguity",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.implicit_rules",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.cross_reference_validation",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.soft_matching",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.weighted_priority",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.dependency_chain",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.calendar_crm_meeting",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.sheets_reconciliation",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.five_level_conditional",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.zoom_crm_meeting",
+   "domain": "sales",
+   "why": "needs salesforce, zoom"
+  },
+  {
+   "task": "sales.zoom_calendar_conflict",
+   "domain": "sales",
+   "why": "needs zoom"
+  },
+  {
+   "task": "sales.email_zoom_fuzzy",
+   "domain": "sales",
+   "why": "needs salesforce, zoom"
+  },
+  {
+   "task": "sales.create_important_draft",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.mark_vip_emails_read",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.create_draft_reply",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.update_contact_phone",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.advance_opportunity_stage",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.create_contact_for_account",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.add_contact_to_campaign",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.qualify_lead",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.create_new_opportunity",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.create_note_on_contact",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.slack_deal_notification",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.linkedin_prospect_research",
+   "domain": "sales",
+   "why": "needs linkedin, salesforce"
+  },
+  {
+   "task": "sales.linkedin_connection_outreach",
+   "domain": "sales",
+   "why": "needs linkedin, salesforce"
+  },
+  {
+   "task": "sales.calendly_no_show_followup",
+   "domain": "sales",
+   "why": "needs calendly, salesforce"
+  },
+  {
+   "task": "sales.docusign_contract_send",
+   "domain": "sales",
+   "why": "needs docusign, salesforce"
+  },
+  {
+   "task": "sales.docusign_deal_workspace",
+   "domain": "sales",
+   "why": "needs docusign, salesforce"
+  },
+  {
+   "task": "sales.calendly_reschedule_chain",
+   "domain": "sales",
+   "why": "needs calendly, salesforce"
+  },
+  {
+   "task": "sales.send_customer_email",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.zoom_meeting_followup",
+   "domain": "sales",
+   "why": "needs salesforce, zoom"
+  },
+  {
+   "task": "sales.linkedin_job_change",
+   "domain": "sales",
+   "why": "needs linkedin, salesforce"
+  },
+  {
+   "task": "sales.calendly_meeting_prep",
+   "domain": "sales",
+   "why": "needs calendly, salesforce"
+  },
+  {
+   "task": "sales.docusign_compliance_template",
+   "domain": "sales",
+   "why": "needs docusign, salesforce"
+  },
+  {
+   "task": "sales.zoom_recording_distribution",
+   "domain": "sales",
+   "why": "needs salesforce, zoom"
+  },
+  {
+   "task": "sales.calendly_capacity_management",
+   "domain": "sales",
+   "why": "needs calendly, salesforce"
+  },
+  {
+   "task": "sales.zoom_attendance_pipeline",
+   "domain": "sales",
+   "why": "needs salesforce, zoom"
+  },
+  {
+   "task": "sales.slack_channel_for_new_account",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.docusign_void_resend",
+   "domain": "sales",
+   "why": "needs docusign, salesforce"
+  },
+  {
+   "task": "sales.calendly_sla_monitoring",
+   "domain": "sales",
+   "why": "needs calendly, salesforce"
+  },
+  {
+   "task": "sales.zoom_webinar_lead_capture",
+   "domain": "sales",
+   "why": "needs salesforce, zoom"
+  },
+  {
+   "task": "sales.docusign_sequential_signing",
+   "domain": "sales",
+   "why": "needs docusign, salesforce"
+  },
+  {
+   "task": "sales.zoom_customer_health",
+   "domain": "sales",
+   "why": "needs salesforce, zoom"
+  },
+  {
+   "task": "sales.calendly_lead_scoring",
+   "domain": "sales",
+   "why": "needs calendly, salesforce"
+  },
+  {
+   "task": "sales.linkedin_signal_monitoring",
+   "domain": "sales",
+   "why": "needs linkedin, salesforce"
+  },
+  {
+   "task": "sales.linkedin_sales_prospecting",
+   "domain": "sales",
+   "why": "needs chatgpt, linkedin, salesforce"
+  },
+  {
+   "task": "sales.demo_scheduling",
+   "domain": "sales",
+   "why": "needs calendly, chatgpt, salesforce, zoom"
+  },
+  {
+   "task": "sales.deal_escalation",
+   "domain": "sales",
+   "why": "needs chatgpt, zoom"
+  },
+  {
+   "task": "sales.milestone_celebration",
+   "domain": "sales",
+   "why": "needs canva, linkedin, salesforce"
+  },
+  {
+   "task": "sales.call_transcription",
+   "domain": "sales",
+   "why": "needs salesforce, zoom"
+  },
+  {
+   "task": "sales.partnership_contract",
+   "domain": "sales",
+   "why": "needs calendly, chatgpt, docusign, salesforce"
+  },
+  {
+   "task": "sales.feedback_routing",
+   "domain": "sales",
+   "why": "needs chatgpt, salesforce"
+  },
+  {
+   "task": "sales.linkedin_profile_enrichment",
+   "domain": "sales",
+   "why": "needs linkedin, salesforce"
+  },
+  {
+   "task": "sales.job_posting_contact",
+   "domain": "sales",
+   "why": "needs linkedin, salesforce"
+  },
+  {
+   "task": "sales.cold_email_personalization",
+   "domain": "sales",
+   "why": "needs linkedin, salesforce"
+  },
+  {
+   "task": "sales.linkedin_event_promotion",
+   "domain": "sales",
+   "why": "needs linkedin, salesforce"
+  },
+  {
+   "task": "sales.linkedin_content_engagement",
+   "domain": "sales",
+   "why": "needs linkedin, salesforce"
+  },
+  {
+   "task": "sales.event_followup_outreach",
+   "domain": "sales",
+   "why": "needs salesforce, zoom"
+  },
+  {
+   "task": "sales.competitive_displacement_outreach",
+   "domain": "sales",
+   "why": "needs linkedin, salesforce"
+  },
+  {
+   "task": "sales.meeting_action_items",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.champion_change_alert",
+   "domain": "sales",
+   "why": "needs linkedin, salesforce"
+  },
+  {
+   "task": "sales.form_to_crm_qualification",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.calendly_discovery_call",
+   "domain": "sales",
+   "why": "needs calendly, salesforce"
+  },
+  {
+   "task": "sales.invalid_email_cleanup",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.sheets_multi_channel_campaign_router",
+   "domain": "sales",
+   "why": "needs linkedin, zoom"
+  },
+  {
+   "task": "sales.chatgpt_lead_classification_pipeline",
+   "domain": "sales",
+   "why": "needs chatgpt, salesforce"
+  },
+  {
+   "task": "sales.cross_platform_account_health_score",
+   "domain": "sales",
+   "why": "needs linkedin, salesforce, zoom"
+  },
+  {
+   "task": "sales.chatgpt_lead_summary_generator",
+   "domain": "sales",
+   "why": "needs chatgpt, linkedin, salesforce"
+  },
+  {
+   "task": "sales.chatgpt_proposal_customization",
+   "domain": "sales",
+   "why": "needs chatgpt, linkedin, salesforce"
+  },
+  {
+   "task": "sales.chatgpt_email_sentiment_routing",
+   "domain": "sales",
+   "why": "needs chatgpt"
+  },
+  {
+   "task": "sales.chatgpt_contract_summary",
+   "domain": "sales",
+   "why": "needs chatgpt, docusign, salesforce"
+  },
+  {
+   "task": "sales.calendly_multi_stakeholder_scheduling",
+   "domain": "sales",
+   "why": "needs calendly, salesforce"
+  },
+  {
+   "task": "sales.calendly_timezone_aware_scheduling",
+   "domain": "sales",
+   "why": "needs calendly, salesforce"
+  },
+  {
+   "task": "sales.calendly_sequential_meetings",
+   "domain": "sales",
+   "why": "needs calendly, salesforce"
+  },
+  {
+   "task": "sales.calendly_availability_based_routing",
+   "domain": "sales",
+   "why": "needs calendly, salesforce"
+  },
+  {
+   "task": "sales.docusign_renewal_automation",
+   "domain": "sales",
+   "why": "needs docusign, salesforce"
+  },
+  {
+   "task": "sales.docusign_conditional_template_selection",
+   "domain": "sales",
+   "why": "needs docusign, salesforce"
+  },
+  {
+   "task": "sales.docusign_completion_processor",
+   "domain": "sales",
+   "why": "needs docusign, salesforce"
+  },
+  {
+   "task": "sales.docusign_bulk_nda_sender",
+   "domain": "sales",
+   "why": "needs docusign, salesforce"
+  },
+  {
+   "task": "sales.zoom_webinar_lead_scoring",
+   "domain": "sales",
+   "why": "needs salesforce, zoom"
+  },
+  {
+   "task": "sales.zoom_meeting_roi_analysis",
+   "domain": "sales",
+   "why": "needs salesforce, zoom"
+  },
+  {
+   "task": "sales.zoom_recurring_meeting_optimizer",
+   "domain": "sales",
+   "why": "needs salesforce, zoom"
+  },
+  {
+   "task": "sales.zoom_regional_webinar_coordinator",
+   "domain": "sales",
+   "why": "needs salesforce, zoom"
+  },
+  {
+   "task": "sales.gcal_travel_time_buffer",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.gcal_deal_milestone_tracker",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.full_sales_cycle_orchestrator",
+   "domain": "sales",
+   "why": "needs calendly, chatgpt, docusign, salesforce, zoom"
+  },
+  {
+   "task": "sales.event_to_opportunity_pipeline",
+   "domain": "sales",
+   "why": "needs calendly, chatgpt, linkedin, salesforce, zoom"
+  },
+  {
+   "task": "sales.contract_renewal_coordinator",
+   "domain": "sales",
+   "why": "needs calendly, chatgpt, docusign, linkedin, salesforce"
+  },
+  {
+   "task": "sales.historical_context_pipeline_report",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.cross_modal_renewal_processing",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.unreliable_label_account_review",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.historical_win_loss_recap",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.vendor_review_prep",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "sales.overdue_followup_flag",
+   "domain": "sales",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "marketing.social_engagement_response",
+   "domain": "marketing",
+   "why": "needs twitter"
+  },
+  {
+   "task": "marketing.lead_enrichment",
+   "domain": "marketing",
+   "why": "needs hubspot"
+  },
+  {
+   "task": "marketing.contact_data_cleanup",
+   "domain": "marketing",
+   "why": "needs hubspot"
+  },
+  {
+   "task": "marketing.ad_performance_review",
+   "domain": "marketing",
+   "why": "needs google_ads"
+  },
+  {
+   "task": "marketing.ad_platform_audit",
+   "domain": "marketing",
+   "why": "needs google_ads"
+  },
+  {
+   "task": "marketing.conversion_tracking",
+   "domain": "marketing",
+   "why": "needs google_ads"
+  },
+  {
+   "task": "marketing.referral_processing",
+   "domain": "marketing",
+   "why": "needs hubspot"
+  },
+  {
+   "task": "marketing.seasonal_campaign",
+   "domain": "marketing",
+   "why": "needs buffer"
+  },
+  {
+   "task": "marketing.event_registration_sync",
+   "domain": "marketing",
+   "why": "needs hubspot, mailchimp"
+  },
+  {
+   "task": "marketing.content_syndication",
+   "domain": "marketing",
+   "why": "needs buffer"
+  },
+  {
+   "task": "marketing.competitive_response_plan",
+   "domain": "marketing",
+   "why": "needs hubspot"
+  },
+  {
+   "task": "marketing.social_scheduling",
+   "domain": "marketing",
+   "why": "needs buffer"
+  },
+  {
+   "task": "marketing.lifecycle_stage",
+   "domain": "marketing",
+   "why": "needs hubspot"
+  },
+  {
+   "task": "marketing.newsletter_unsubscribe_processing",
+   "domain": "marketing",
+   "why": "needs mailchimp"
+  },
+  {
+   "task": "marketing.customer_story_intake",
+   "domain": "marketing",
+   "why": "needs hubspot"
+  },
+  {
+   "task": "marketing.app_review_triage",
+   "domain": "marketing",
+   "why": "needs hubspot"
+  },
+  {
+   "task": "marketing.product_launch_channel_plan",
+   "domain": "marketing",
+   "why": "needs facebook_pages"
+  },
+  {
+   "task": "marketing.email_blast_suppression",
+   "domain": "marketing",
+   "why": "needs mailchimp"
+  },
+  {
+   "task": "marketing.webinar_cancellation_workflow",
+   "domain": "marketing",
+   "why": "needs hubspot"
+  },
+  {
+   "task": "marketing.twitter_influencer_followup",
+   "domain": "marketing",
+   "why": "needs twitter"
+  },
+  {
+   "task": "marketing.facebook_photo_highlight",
+   "domain": "marketing",
+   "why": "needs facebook_pages"
+  },
+  {
+   "task": "marketing.instagram_approved_asset_publish",
+   "domain": "marketing",
+   "why": "needs instagram"
+  },
+  {
+   "task": "marketing.linkedin_company_update",
+   "domain": "marketing",
+   "why": "needs linkedin"
+  },
+  {
+   "task": "marketing.linkedin_speaker_outreach",
+   "domain": "marketing",
+   "why": "needs linkedin"
+  },
+  {
+   "task": "marketing.google_ads_pause_low_ctr",
+   "domain": "marketing",
+   "why": "needs google_ads"
+  },
+  {
+   "task": "marketing.google_ads_high_intent_list_from_hubspot",
+   "domain": "marketing",
+   "why": "needs google_ads, hubspot"
+  },
+  {
+   "task": "marketing.event_followup_personalization",
+   "domain": "marketing",
+   "why": "needs hubspot"
+  },
+  {
+   "task": "operations.asana_fire_drill",
+   "domain": "operations",
+   "why": "needs asana"
+  },
+  {
+   "task": "operations.trello_basecamp_compliance",
+   "domain": "operations",
+   "why": "needs trello"
+  },
+  {
+   "task": "operations.monday_email_update",
+   "domain": "operations",
+   "why": "needs monday"
+  },
+  {
+   "task": "operations.jira_confluence_incident",
+   "domain": "operations",
+   "why": "asserts on confluence"
+  },
+  {
+   "task": "operations.calendar_airtable_maintenance",
+   "domain": "operations",
+   "why": "asserts on airtable"
+  },
+  {
+   "task": "operations.pipefy_vendor_onboarding",
+   "domain": "operations",
+   "why": "needs pipefy"
+  },
+  {
+   "task": "operations.asana_safety_walk_log",
+   "domain": "operations",
+   "why": "needs asana"
+  },
+  {
+   "task": "operations.trello_vendor_hold_email",
+   "domain": "operations",
+   "why": "needs trello"
+  },
+  {
+   "task": "operations.monday_slack_inventory",
+   "domain": "operations",
+   "why": "needs monday"
+  },
+  {
+   "task": "operations.confluence_gmail_policy_notice",
+   "domain": "operations",
+   "why": "asserts on confluence"
+  },
+  {
+   "task": "operations.pipefy_gmail_vendor_approval",
+   "domain": "operations",
+   "why": "needs pipefy"
+  },
+  {
+   "task": "operations.asana_basecamp_move_planning",
+   "domain": "operations",
+   "why": "needs asana"
+  },
+  {
+   "task": "operations.monday_calendar_emergency_drill",
+   "domain": "operations",
+   "why": "needs monday"
+  },
+  {
+   "task": "operations.sheets_asana_approved_request",
+   "domain": "operations",
+   "why": "needs asana"
+  },
+  {
+   "task": "operations.sheets_monday_maintenance_queue",
+   "domain": "operations",
+   "why": "needs monday"
+  },
+  {
+   "task": "operations.pipefy_slack_purchase_request",
+   "domain": "operations",
+   "why": "needs pipefy"
+  },
+  {
+   "task": "operations.airtable_gmail_visitor_followup",
+   "domain": "operations",
+   "why": "asserts on airtable"
+  },
+  {
+   "task": "operations.asana_slack_sheets_audit",
+   "domain": "operations",
+   "why": "needs asana"
+  },
+  {
+   "task": "operations.calendar_airtable_gmail_maintenance_notice",
+   "domain": "operations",
+   "why": "asserts on airtable"
+  },
+  {
+   "task": "operations.trello_basecamp_slack_compliance_followup",
+   "domain": "operations",
+   "why": "needs trello"
+  },
+  {
+   "task": "operations.salesforce_escalated_customer",
+   "domain": "operations",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "operations.twilio_afterhours_incident",
+   "domain": "operations",
+   "why": "needs twilio"
+  },
+  {
+   "task": "operations.calendly_equipment_inspection",
+   "domain": "operations",
+   "why": "needs airtable, calendly"
+  },
+  {
+   "task": "operations.zoom_change_advisory",
+   "domain": "operations",
+   "why": "needs asana, zoom"
+  },
+  {
+   "task": "operations.docusign_lease_renewal",
+   "domain": "operations",
+   "why": "needs docusign"
+  },
+  {
+   "task": "operations.zoom_dr_drill",
+   "domain": "operations",
+   "why": "needs asana, confluence, zoom"
+  },
+  {
+   "task": "operations.insurance_cert_validation",
+   "domain": "operations",
+   "why": "needs docusign"
+  },
+  {
+   "task": "operations.docusign_contractor_offboard",
+   "domain": "operations",
+   "why": "needs docusign, trello"
+  },
+  {
+   "task": "operations.zoom_training_setup",
+   "domain": "operations",
+   "why": "needs airtable, monday, zoom"
+  },
+  {
+   "task": "operations.access_request_validation",
+   "domain": "operations",
+   "why": "needs asana"
+  },
+  {
+   "task": "operations.zoom_board_meeting",
+   "domain": "operations",
+   "why": "needs docusign, monday, zoom"
+  },
+  {
+   "task": "operations.twilio_facilities_emergency",
+   "domain": "operations",
+   "why": "needs monday, twilio"
+  },
+  {
+   "task": "operations.zoom_deal_review",
+   "domain": "operations",
+   "why": "needs monday, salesforce, zoom"
+  },
+  {
+   "task": "operations.twilio_production_incident",
+   "domain": "operations",
+   "why": "needs twilio"
+  },
+  {
+   "task": "operations.docusign_prospect_nda",
+   "domain": "operations",
+   "why": "needs airtable, docusign"
+  },
+  {
+   "task": "operations.zoom_project_kickoff",
+   "domain": "operations",
+   "why": "needs trello, zoom"
+  },
+  {
+   "task": "operations.docusign_annual_review",
+   "domain": "operations",
+   "why": "needs confluence, docusign, monday, zoom"
+  },
+  {
+   "task": "operations.hubspot_ticket_escalation",
+   "domain": "operations",
+   "why": "needs hubspot"
+  },
+  {
+   "task": "operations.mailchimp_subscriber_sync",
+   "domain": "operations",
+   "why": "needs mailchimp"
+  },
+  {
+   "task": "operations.chatgpt_feedback_analysis",
+   "domain": "operations",
+   "why": "needs chatgpt"
+  },
+  {
+   "task": "operations.hubspot_lead_qualification",
+   "domain": "operations",
+   "why": "needs hubspot"
+  },
+  {
+   "task": "operations.mailchimp_campaign_tracking",
+   "domain": "operations",
+   "why": "needs airtable, mailchimp"
+  },
+  {
+   "task": "operations.google_ads_budget_alert",
+   "domain": "operations",
+   "why": "needs google_ads"
+  },
+  {
+   "task": "operations.canva_asset_management",
+   "domain": "operations",
+   "why": "needs canva"
+  },
+  {
+   "task": "operations.hubspot_personalized_outreach",
+   "domain": "operations",
+   "why": "needs chatgpt, hubspot"
+  },
+  {
+   "task": "operations.linkedin_job_change",
+   "domain": "operations",
+   "why": "needs linkedin, salesforce"
+  },
+  {
+   "task": "operations.contractor_onboarding_workflow",
+   "domain": "operations",
+   "why": "needs asana"
+  },
+  {
+   "task": "operations.hubspot_churn_prediction",
+   "domain": "operations",
+   "why": "needs hubspot"
+  },
+  {
+   "task": "operations.hubspot_payment_failure",
+   "domain": "operations",
+   "why": "needs hubspot"
+  },
+  {
+   "task": "operations.mailchimp_ecommerce_sync",
+   "domain": "operations",
+   "why": "needs mailchimp"
+  },
+  {
+   "task": "operations.training_compliance_check",
+   "domain": "operations",
+   "why": "needs asana"
+  },
+  {
+   "task": "operations.hubspot_mailchimp_sync",
+   "domain": "operations",
+   "why": "needs hubspot, mailchimp"
+  },
+  {
+   "task": "operations.linkedin_abm_outreach",
+   "domain": "operations",
+   "why": "needs linkedin, salesforce"
+  },
+  {
+   "task": "operations.buffer_engagement_optimization",
+   "domain": "operations",
+   "why": "needs buffer"
+  },
+  {
+   "task": "operations.invoice_shipping_trigger",
+   "domain": "operations",
+   "why": "needs monday"
+  },
+  {
+   "task": "operations.overdue_inspection_summary",
+   "domain": "operations",
+   "why": "needs asana"
+  },
+  {
+   "task": "operations.vendor_compliance_audit",
+   "domain": "operations",
+   "why": "needs salesforce"
+  },
+  {
+   "task": "operations.facility_incident_triage",
+   "domain": "operations",
+   "why": "needs twilio"
+  },
+  {
+   "task": "operations.equipment_lease_processing",
+   "domain": "operations",
+   "why": "needs docusign"
+  },
+  {
+   "task": "operations.sla_breach_early_warning",
+   "domain": "operations",
+   "why": "needs twilio"
+  },
+  {
+   "task": "operations.role_based_access_audit",
+   "domain": "operations",
+   "why": "needs asana"
+  },
+  {
+   "task": "operations.contractor_badge_expiration",
+   "domain": "operations",
+   "why": "needs twilio"
+  },
+  {
+   "task": "operations.purchase_order_three_way_match",
+   "domain": "operations",
+   "why": "needs monday"
+  },
+  {
+   "task": "operations.perishable_inventory_expiry",
+   "domain": "operations",
+   "why": "needs twilio"
+  },
+  {
+   "task": "operations.equipment_calibration_scheduling",
+   "domain": "operations",
+   "why": "needs asana"
+  },
+  {
+   "task": "operations.overtime_threshold_monitoring",
+   "domain": "operations",
+   "why": "needs twilio"
+  },
+  {
+   "task": "operations.contract_renewal_pipeline",
+   "domain": "operations",
+   "why": "needs docusign"
+  },
+  {
+   "task": "operations.safety_incident_investigation_routing",
+   "domain": "operations",
+   "why": "needs twilio"
+  },
+  {
+   "task": "operations.mailroom_package_routing",
+   "domain": "operations",
+   "why": "needs twilio"
+  },
+  {
+   "task": "operations.cross_training_assignment",
+   "domain": "operations",
+   "why": "needs asana"
+  },
+  {
+   "task": "operations.procurement_card_reconciliation",
+   "domain": "operations",
+   "why": "needs monday"
+  },
+  {
+   "task": "operations.hazmat_shipping_compliance",
+   "domain": "operations",
+   "why": "needs docusign"
+  },
+  {
+   "task": "operations.fire_suppression_testing",
+   "domain": "operations",
+   "why": "needs twilio"
+  },
+  {
+   "task": "support.zendesk_sf_case_sync",
+   "domain": "support",
+   "why": "needs salesforce, zendesk"
+  },
+  {
+   "task": "support.helpscout_jira_bugs",
+   "domain": "support",
+   "why": "needs helpscout"
+  },
+  {
+   "task": "support.gorgias_order_lookup",
+   "domain": "support",
+   "why": "needs gorgias"
+  },
+  {
+   "task": "support.zoho_sf_enrichment",
+   "domain": "support",
+   "why": "needs salesforce, zoho_desk"
+  },
+  {
+   "task": "support.zendesk_maintenance_notify",
+   "domain": "support",
+   "why": "needs zendesk"
+  },
+  {
+   "task": "support.intercom_demo_scheduling",
+   "domain": "support",
+   "why": "needs intercom"
+  },
+  {
+   "task": "support.helpscout_weekly_report",
+   "domain": "support",
+   "why": "needs helpscout"
+  },
+  {
+   "task": "support.zendesk_hubspot_org_sync",
+   "domain": "support",
+   "why": "needs hubspot, zendesk"
+  },
+  {
+   "task": "support.freshdesk_faq_drafts",
+   "domain": "support",
+   "why": "needs freshdesk"
+  },
+  {
+   "task": "support.zoho_freshdesk_escalation",
+   "domain": "support",
+   "why": "needs freshdesk, zoho_desk"
+  },
+  {
+   "task": "support.intercom_winback",
+   "domain": "support",
+   "why": "needs intercom"
+  },
+  {
+   "task": "support.intercom_freshdesk_escalation",
+   "domain": "support",
+   "why": "needs freshdesk, intercom"
+  },
+  {
+   "task": "support.gorgias_refund_processing",
+   "domain": "support",
+   "why": "needs gorgias"
+  },
+  {
+   "task": "support.zoho_calendar_callbacks",
+   "domain": "support",
+   "why": "needs zoho_desk"
+  },
+  {
+   "task": "support.hiver_inbox_report",
+   "domain": "support",
+   "why": "needs hiver"
+  },
+  {
+   "task": "support.zendesk_intercom_company_sync",
+   "domain": "support",
+   "why": "needs intercom, zendesk"
+  },
+  {
+   "task": "support.helpscout_daily_digest",
+   "domain": "support",
+   "why": "needs helpscout"
+  },
+  {
+   "task": "support.gorgias_freshdesk_migration",
+   "domain": "support",
+   "why": "needs freshdesk, gorgias"
+  },
+  {
+   "task": "support.freshdesk_reamaze_migration",
+   "domain": "support",
+   "why": "needs freshdesk, reamaze"
+  },
+  {
+   "task": "support.zendesk_hubspot_churn_risk",
+   "domain": "support",
+   "why": "needs hubspot, salesforce, zendesk"
+  },
+  {
+   "task": "support.reamaze_intercom_migration",
+   "domain": "support",
+   "why": "needs intercom, reamaze"
+  },
+  {
+   "task": "support.zoho_desk_ticket_categorization",
+   "domain": "support",
+   "why": "needs zoho_desk"
+  },
+  {
+   "task": "support.hiver_csat_analysis",
+   "domain": "support",
+   "why": "needs hiver"
+  },
+  {
+   "task": "support.freshdesk_onboarding_automation",
+   "domain": "support",
+   "why": "needs freshdesk"
+  },
+  {
+   "task": "support.intercom_usage_health_scoring",
+   "domain": "support",
+   "why": "needs intercom"
+  },
+  {
+   "task": "support.helpscout_knowledge_gap_analysis",
+   "domain": "support",
+   "why": "needs helpscout"
+  },
+  {
+   "task": "support.hiver_team_performance",
+   "domain": "support",
+   "why": "needs hiver"
+  },
+  {
+   "task": "support.freshdesk_sla_monitoring",
+   "domain": "support",
+   "why": "needs freshdesk"
+  },
+  {
+   "task": "support.zoho_desk_warranty_processing",
+   "domain": "support",
+   "why": "needs zoho_desk"
+  },
+  {
+   "task": "support.zendesk_freshdesk_sync",
+   "domain": "support",
+   "why": "needs freshdesk, zendesk"
+  },
+  {
+   "task": "support.freshdesk_zoho_migration",
+   "domain": "support",
+   "why": "needs freshdesk, zoho_desk"
+  },
+  {
+   "task": "support.helpscout_hubspot_deal_alerts",
+   "domain": "support",
+   "why": "needs helpscout, hubspot"
+  },
+  {
+   "task": "support.gorgias_quality_audit",
+   "domain": "support",
+   "why": "needs gorgias"
+  },
+  {
+   "task": "support.hiver_slack_digest",
+   "domain": "support",
+   "why": "needs hiver"
+  },
+  {
+   "task": "support.zendesk_customer_360",
+   "domain": "support",
+   "why": "needs hubspot, zendesk"
+  },
+  {
+   "task": "support.intercom_sf_opportunity_alerts",
+   "domain": "support",
+   "why": "needs intercom, salesforce"
+  },
+  {
+   "task": "support.helpscout_reamaze_migration",
+   "domain": "support",
+   "why": "needs helpscout, reamaze"
+  },
+  {
+   "task": "support.zendesk_automated_responses",
+   "domain": "support",
+   "why": "needs zendesk"
+  },
+  {
+   "task": "support.helpcrunch_engagement_scoring",
+   "domain": "support",
+   "why": "needs helpcrunch"
+  },
+  {
+   "task": "support.helpcrunch_zoho_desk_bridge",
+   "domain": "support",
+   "why": "needs helpcrunch, zoho_desk"
+  },
+  {
+   "task": "support.zendesk_gdpr_purge",
+   "domain": "support",
+   "why": "needs zendesk"
+  },
+  {
+   "task": "support.zendesk_cross_org_merge",
+   "domain": "support",
+   "why": "needs zendesk"
+  },
+  {
+   "task": "support.zendesk_weekend_handoff",
+   "domain": "support",
+   "why": "needs zendesk"
+  },
+  {
+   "task": "support.zendesk_data_quality",
+   "domain": "support",
+   "why": "needs zendesk"
+  },
+  {
+   "task": "support.freshdesk_contract_renewal",
+   "domain": "support",
+   "why": "needs freshdesk"
+  },
+  {
+   "task": "support.freshdesk_compliance_tagging",
+   "domain": "support",
+   "why": "needs freshdesk"
+  },
+  {
+   "task": "support.freshdesk_journey_mapping",
+   "domain": "support",
+   "why": "needs freshdesk, hubspot"
+  },
+  {
+   "task": "support.freshdesk_auto_merge",
+   "domain": "support",
+   "why": "needs freshdesk"
+  },
+  {
+   "task": "support.freshdesk_escalation_matrix",
+   "domain": "support",
+   "why": "needs freshdesk"
+  },
+  {
+   "task": "support.intercom_sentiment_escalation",
+   "domain": "support",
+   "why": "needs intercom"
+  },
+  {
+   "task": "support.intercom_feature_request",
+   "domain": "support",
+   "why": "needs intercom"
+  },
+  {
+   "task": "support.intercom_auto_response_drafts",
+   "domain": "support",
+   "why": "needs intercom"
+  },
+  {
+   "task": "support.helpscout_response_audit",
+   "domain": "support",
+   "why": "needs helpscout"
+  },
+  {
+   "task": "support.helpscout_customer_merge",
+   "domain": "support",
+   "why": "needs helpscout"
+  },
+  {
+   "task": "support.helpscout_health_sync",
+   "domain": "support",
+   "why": "needs helpscout, salesforce"
+  },
+  {
+   "task": "support.helpscout_auto_categorization",
+   "domain": "support",
+   "why": "needs helpscout"
+  },
+  {
+   "task": "support.gorgias_defect_tracking",
+   "domain": "support",
+   "why": "needs gorgias"
+  },
+  {
+   "task": "support.gorgias_channel_consolidation",
+   "domain": "support",
+   "why": "needs gorgias"
+  },
+  {
+   "task": "support.reamaze_knowledge_routing",
+   "domain": "support",
+   "why": "needs reamaze"
+  },
+  {
+   "task": "support.reamaze_lifecycle_tagging",
+   "domain": "support",
+   "why": "needs hubspot, reamaze"
+  },
+  {
+   "task": "support.reamaze_multilanguage",
+   "domain": "support",
+   "why": "needs reamaze"
+  },
+  {
+   "task": "support.reamaze_cross_platform_dedup",
+   "domain": "support",
+   "why": "needs freshdesk, reamaze"
+  },
+  {
+   "task": "support.reamaze_feedback_sentiment",
+   "domain": "support",
+   "why": "needs reamaze"
+  },
+  {
+   "task": "support.reamaze_campaign_tracking",
+   "domain": "support",
+   "why": "needs reamaze"
+  },
+  {
+   "task": "support.zoho_vendor_tickets",
+   "domain": "support",
+   "why": "needs zoho_desk"
+  },
+  {
+   "task": "support.zoho_risk_scoring",
+   "domain": "support",
+   "why": "needs salesforce, zoho_desk"
+  },
+  {
+   "task": "support.zoho_multitenant_isolation",
+   "domain": "support",
+   "why": "needs zoho_desk"
+  },
+  {
+   "task": "support.zoho_account_health",
+   "domain": "support",
+   "why": "needs salesforce, zoho_desk"
+  },
+  {
+   "task": "support.zoho_resolution_patterns",
+   "domain": "support",
+   "why": "needs zoho_desk"
+  },
+  {
+   "task": "support.helpcrunch_usage_alerts",
+   "domain": "support",
+   "why": "needs helpcrunch, salesforce"
+  },
+  {
+   "task": "support.helpcrunch_trial_nurture",
+   "domain": "support",
+   "why": "needs helpcrunch, salesforce"
+  },
+  {
+   "task": "support.helpcrunch_satisfaction",
+   "domain": "support",
+   "why": "needs helpcrunch, salesforce"
+  },
+  {
+   "task": "support.hiver_cross_team_handoff",
+   "domain": "support",
+   "why": "needs hiver"
+  },
+  {
+   "task": "support.hiver_mailbox_audit",
+   "domain": "support",
+   "why": "needs hiver"
+  },
+  {
+   "task": "support.hiver_workload_forecast",
+   "domain": "support",
+   "why": "needs hiver"
+  },
+  {
+   "task": "support.hiver_escalation_patterns",
+   "domain": "support",
+   "why": "needs hiver"
+  },
+  {
+   "task": "support.hiver_coaching_pipeline",
+   "domain": "support",
+   "why": "needs hiver"
+  },
+  {
+   "task": "support.zendesk_escalation_waterfall",
+   "domain": "support",
+   "why": "needs zendesk"
+  },
+  {
+   "task": "support.zendesk_customer_sentiment",
+   "domain": "support",
+   "why": "needs zendesk"
+  },
+  {
+   "task": "support.freshdesk_csat_followup",
+   "domain": "support",
+   "why": "needs freshdesk"
+  },
+  {
+   "task": "support.freshdesk_warranty_adjudication",
+   "domain": "support",
+   "why": "needs freshdesk"
+  },
+  {
+   "task": "support.freshdesk_multi_queue_routing",
+   "domain": "support",
+   "why": "needs freshdesk"
+  },
+  {
+   "task": "support.intercom_multi_product_routing",
+   "domain": "support",
+   "why": "needs intercom"
+  },
+  {
+   "task": "support.intercom_reactivation_campaign",
+   "domain": "support",
+   "why": "needs intercom"
+  },
+  {
+   "task": "support.intercom_conversation_quality",
+   "domain": "support",
+   "why": "needs intercom"
+  },
+  {
+   "task": "support.helpscout_customer_effort",
+   "domain": "support",
+   "why": "needs helpscout"
+  },
+  {
+   "task": "support.helpscout_kb_feedback",
+   "domain": "support",
+   "why": "needs helpscout"
+  },
+  {
+   "task": "support.helpscout_cross_team_handoff",
+   "domain": "support",
+   "why": "needs helpscout"
+  },
+  {
+   "task": "support.gorgias_fraud_detection",
+   "domain": "support",
+   "why": "needs gorgias"
+  },
+  {
+   "task": "support.gorgias_inventory_routing",
+   "domain": "support",
+   "why": "needs gorgias"
+  },
+  {
+   "task": "support.gorgias_loyalty_program",
+   "domain": "support",
+   "why": "needs gorgias"
+  },
+  {
+   "task": "support.reamaze_multi_channel_dedup",
+   "domain": "support",
+   "why": "needs reamaze"
+  },
+  {
+   "task": "support.zoho_desk_capacity_planning",
+   "domain": "support",
+   "why": "needs zoho_desk"
+  },
+  {
+   "task": "support.zoho_desk_customer_journey",
+   "domain": "support",
+   "why": "needs zoho_desk"
+  },
+  {
+   "task": "support.zoho_desk_root_cause",
+   "domain": "support",
+   "why": "needs zoho_desk"
+  },
+  {
+   "task": "support.hiver_response_sla",
+   "domain": "support",
+   "why": "needs hiver"
+  },
+  {
+   "task": "support.hiver_quality_coaching",
+   "domain": "support",
+   "why": "needs hiver"
+  },
+  {
+   "task": "support.zendesk_freshdesk_reconciliation",
+   "domain": "support",
+   "why": "needs freshdesk, zendesk"
+  },
+  {
+   "task": "support.intercom_zoho_customer_360",
+   "domain": "support",
+   "why": "needs intercom, zoho_desk"
+  },
+  {
+   "task": "support.reamaze_intercom_sync",
+   "domain": "support",
+   "why": "needs intercom, reamaze"
+  },
+  {
+   "task": "finance.qb_customer_onboard",
+   "domain": "finance",
+   "why": "needs quickbooks, salesforce"
+  },
+  {
+   "task": "finance.qb_invoice_from_orders",
+   "domain": "finance",
+   "why": "needs quickbooks"
+  },
+  {
+   "task": "finance.xero_bill_entry",
+   "domain": "finance",
+   "why": "needs xero"
+  },
+  {
+   "task": "finance.wave_freelance_invoice",
+   "domain": "finance",
+   "why": "needs wave"
+  },
+  {
+   "task": "finance.payment_reconciliation",
+   "domain": "finance",
+   "why": "needs quickbooks"
+  },
+  {
+   "task": "finance.xero_credit_allocation",
+   "domain": "finance",
+   "why": "needs xero"
+  },
+  {
+   "task": "finance.xero_vendor_onboard",
+   "domain": "finance",
+   "why": "needs salesforce, xero"
+  },
+  {
+   "task": "finance.airtable_expense_approval",
+   "domain": "finance",
+   "why": "needs airtable"
+  },
+  {
+   "task": "finance.qb_estimate_conversion",
+   "domain": "finance",
+   "why": "needs quickbooks"
+  },
+  {
+   "task": "finance.xero_bank_reconcile",
+   "domain": "finance",
+   "why": "needs xero"
+  },
+  {
+   "task": "finance.wave_product_catalog",
+   "domain": "finance",
+   "why": "needs wave"
+  },
+  {
+   "task": "finance.contract_billing",
+   "domain": "finance",
+   "why": "needs quickbooks"
+  },
+  {
+   "task": "finance.refund_processing",
+   "domain": "finance",
+   "why": "needs quickbooks"
+  },
+  {
+   "task": "finance.xero_batch_invoice_send",
+   "domain": "finance",
+   "why": "needs xero"
+  },
+  {
+   "task": "finance.wave_tax_compliance",
+   "domain": "finance",
+   "why": "needs wave"
+  },
+  {
+   "task": "finance.payment_terms_tracking",
+   "domain": "finance",
+   "why": "needs quickbooks"
+  },
+  {
+   "task": "finance.qb_sales_receipt_batch",
+   "domain": "finance",
+   "why": "needs quickbooks"
+  },
+  {
+   "task": "finance.subscription_billing",
+   "domain": "finance",
+   "why": "needs wave"
+  },
+  {
+   "task": "finance.xero_multicurrency_payment",
+   "domain": "finance",
+   "why": "needs xero"
+  },
+  {
+   "task": "finance.qb_bill_payment_batch",
+   "domain": "finance",
+   "why": "needs quickbooks"
+  },
+  {
+   "task": "finance.intercompany_invoice",
+   "domain": "finance",
+   "why": "needs quickbooks"
+  },
+  {
+   "task": "finance.qb_customer_balance_review",
+   "domain": "finance",
+   "why": "needs quickbooks"
+  },
+  {
+   "task": "finance.xero_po_matching",
+   "domain": "finance",
+   "why": "needs xero"
+  },
+  {
+   "task": "finance.wave_client_statement",
+   "domain": "finance",
+   "why": "needs wave"
+  },
+  {
+   "task": "finance.qb_void_stale_invoices",
+   "domain": "finance",
+   "why": "needs quickbooks"
+  },
+  {
+   "task": "finance.xero_quote_to_invoice",
+   "domain": "finance",
+   "why": "needs xero"
+  },
+  {
+   "task": "finance.qb_undeposited_funds",
+   "domain": "finance",
+   "why": "needs quickbooks"
+  },
+  {
+   "task": "hr.job_posting_distribution",
+   "domain": "hr",
+   "why": "needs recruitee"
+  },
+  {
+   "task": "hr.job_board_monitoring",
+   "domain": "hr",
+   "why": "needs linkedin"
+  },
+  {
+   "task": "hr.monday_onboarding_pipeline",
+   "domain": "hr",
+   "why": "needs monday"
+  },
+  {
+   "task": "hr.docusign_offer_letters",
+   "domain": "hr",
+   "why": "needs docusign"
+  },
+  {
+   "task": "hr.candidate_research_dossier",
+   "domain": "hr",
+   "why": "needs linkedin"
+  },
+  {
+   "task": "hr.twilio_interview_reminders",
+   "domain": "hr",
+   "why": "needs twilio"
+  },
+  {
+   "task": "hr.airtable_skills_matrix",
+   "domain": "hr",
+   "why": "needs airtable"
+  },
+  {
+   "task": "hr.calendly_exit_interviews",
+   "domain": "hr",
+   "why": "needs bamboohr, calendly"
+  },
+  {
+   "task": "hr.bamboohr_promotion_update",
+   "domain": "hr",
+   "why": "needs bamboohr"
+  },
+  {
+   "task": "hr.asana_compliance_tasks",
+   "domain": "hr",
+   "why": "needs asana"
+  },
+  {
+   "task": "hr.multi_app_new_hire_setup",
+   "domain": "hr",
+   "why": "needs bamboohr"
+  },
+  {
+   "task": "hr.zoom_orientation_sessions",
+   "domain": "hr",
+   "why": "needs zoom"
+  },
+  {
+   "task": "hr.airtable_recruitment_analytics",
+   "domain": "hr",
+   "why": "needs airtable"
+  },
+  {
+   "task": "hr.docusign_nda_collection",
+   "domain": "hr",
+   "why": "needs docusign"
+  },
+  {
+   "task": "hr.monday_pip_tracking",
+   "domain": "hr",
+   "why": "needs monday"
+  },
+  {
+   "task": "hr.trello_internal_transfers",
+   "domain": "hr",
+   "why": "needs trello"
+  },
+  {
+   "task": "hr.intern_program_coordination",
+   "domain": "hr",
+   "why": "needs asana"
+  },
+  {
+   "task": "hr.offboarding_multi_system",
+   "domain": "hr",
+   "why": "needs bamboohr"
+  },
+  {
+   "task": "hr.docusign_policy_acknowledgment",
+   "domain": "hr",
+   "why": "needs docusign"
+  },
+  {
+   "task": "hr.twilio_emergency_notification",
+   "domain": "hr",
+   "why": "needs twilio"
+  },
+  {
+   "task": "hr.benefits_open_enrollment_processing",
+   "domain": "hr",
+   "why": "needs bamboohr"
+  },
+  {
+   "task": "hr.candidate_offer_negotiation_tracking",
+   "domain": "hr",
+   "why": "needs recruitee"
+  },
+  {
+   "task": "hr.employee_transfer_approval_workflow",
+   "domain": "hr",
+   "why": "needs bamboohr"
+  },
+  {
+   "task": "hr.compliance_training_enrollment",
+   "domain": "hr",
+   "why": "needs bamboohr"
+  },
+  {
+   "task": "hr.docusign_severance_agreements",
+   "domain": "hr",
+   "why": "needs docusign"
+  },
+  {
+   "task": "hr.airtable_learning_path_assignment",
+   "domain": "hr",
+   "why": "needs airtable"
+  },
+  {
+   "task": "hr.monday_succession_planning",
+   "domain": "hr",
+   "why": "needs monday"
+  },
+  {
+   "task": "hr.trello_recruiting_event_coordination",
+   "domain": "hr",
+   "why": "needs trello"
+  },
+  {
+   "task": "hr.zoom_all_hands_setup",
+   "domain": "hr",
+   "why": "needs zoom"
+  },
+  {
+   "task": "hr.calendly_manager_office_hours",
+   "domain": "hr",
+   "why": "needs calendly"
+  },
+  {
+   "task": "hr.confluence_policy_migration",
+   "domain": "hr",
+   "why": "asserts on confluence"
+  }
+ ]
+}
