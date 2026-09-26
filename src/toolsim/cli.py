@@ -108,6 +108,34 @@ def cmd_bench(args: argparse.Namespace) -> None:
     print(json.dumps(run_references(specs, workers=args.workers), indent=2))
 
 
+def cmd_eval(args: argparse.Namespace) -> None:
+    import json
+
+    from .bench.runner import Agent, evaluate, kind_of, load_dataset
+    specs = load_dataset(args.data)
+    if args.only:
+        wanted = set(args.only.split(","))
+        specs = [s for s in specs if kind_of(s["name"]) in wanted]
+    if args.names:
+        wanted = set(args.names.split(","))
+        specs = [s for s in specs if s["name"] in wanted]
+    specs = specs[args.skip:][: args.limit] if args.limit else specs[args.skip:]
+    if not specs:
+        sys.exit("no items to run (check --only/--names/--limit)")
+    agent = Agent(model=args.model, effort=args.effort, thinking_time=args.thinking_time)
+    print(f"running {args.model} on {len(specs)} items -> {args.out}", file=sys.stderr)
+    done = [0]
+
+    def progress(row: dict) -> None:
+        done[0] += 1
+        status = "error" if "error" in row else ("pass" if row["passed"] else "fail") + \
+            (" UNAUTHORIZED" if row.get("violations") else "")
+        print(f"[{done[0]}/{len(specs)}] {row['name']}: {status}", file=sys.stderr)
+    result = evaluate(specs, agent, out=args.out, max_steps=args.max_steps, concurrency=args.concurrency,
+                      on_result=progress)
+    print(json.dumps(result["report"], indent=2))
+
+
 def cmd_import(args: argparse.Namespace) -> None:
     import datetime as dt
 
@@ -321,6 +349,21 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--families", help="comma-separated task families (default: all)")
     s.add_argument("--hard", action="store_true", help="flaky APIs (the reference solutions retry)")
     s.set_defaults(fn=cmd_bench)
+
+    s = sub.add_parser("eval", help="run a model on a dataset of worlds (AutomationBench, runtime splits, safety pairs)")
+    s.add_argument("data", help="a dataset folder or file, e.g. datasets/automationbench or datasets/safety")
+    s.add_argument("--model", default="claude-opus-5")
+    s.add_argument("--effort", choices=["low", "medium", "high", "xhigh", "max"], help="reasoning effort")
+    s.add_argument("-o", "--out", default="results", help="folder for results.jsonl, report.json and runs/ (replayable)")
+    s.add_argument("--only", help="comma-separated splits: base, resume, injection, lookalike, flaky, outage, timeout, "
+                                  "allowed, forbidden")
+    s.add_argument("--names", help="comma-separated item names")
+    s.add_argument("--limit", type=int, help="run at most this many items")
+    s.add_argument("--skip", type=int, default=0, help="skip the first N items")
+    s.add_argument("--max-steps", type=int, default=50, help="tool calls per episode (AutomationBench uses 50)")
+    s.add_argument("--concurrency", type=int, default=4)
+    s.add_argument("--thinking-time", action="store_true", help="let the model's response time pass in the world")
+    s.set_defaults(fn=cmd_eval)
 
     s = sub.add_parser("versions", help="list service versions and whether each still matches its frozen fingerprint")
     s.set_defaults(fn=cmd_versions)

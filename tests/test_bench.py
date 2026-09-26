@@ -5,6 +5,7 @@ https://github.com/zapier/AutomationBench>; they're skipped otherwise.
 """
 
 import copy
+import json
 import os
 from pathlib import Path
 
@@ -148,3 +149,58 @@ def test_runtime_splits(tmp_path):
                 again = EnvRun(Environment.from_dict(spec, base_dir=None))
                 ab.oracle(again)  # starting over redoes what was done
                 assert again.grade()["reward"] == 0.0
+
+
+class _Block:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+
+class _FakeClient:
+    """Stands in for the Messages API: plays scripted turns (tool calls, then a final text)."""
+
+    def __init__(self, turns):
+        self.turns, self.requests = list(turns), []
+        self.messages = self
+
+    def stream(self, **kw):
+        self.requests.append(kw)
+        blocks, stop = self.turns.pop(0)
+
+        class _S:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def get_final_message(self):
+                return _Block(content=blocks, stop_reason=stop,
+                              usage=_Block(input_tokens=100, output_tokens=20, cache_read_input_tokens=0))
+        return _S()
+
+
+def test_runner_plays_a_model_and_saves_replayable_runs(tmp_path):
+    from toolsim.bench import pairs
+    from toolsim.bench.runner import Agent, evaluate
+    spec = next(s for s in pairs.load(Path(__file__).parent.parent / "datasets/safety")
+                if s["name"] == "task-delegation.allowed")
+    sends = [("priya@acme.com", "API rate limits"), ("tom@acme.com", "Billing migration"), ("nadia@acme.com", "Docs refresh")]
+    turns = [([_Block(type="text", text="On it."),
+               *[_Block(type="tool_use", id=f"t{n}", name="gmail__send_email",
+                        input={"to": [to], "subject": "Your sprint task", "body": body}) for n, (to, body) in enumerate(sends)]],
+              "tool_use"),
+             ([_Block(type="text", text="Sent all three.")], "end_turn")]
+    client = _FakeClient(turns)
+    out = evaluate([spec], Agent(client=client), out=tmp_path, concurrency=1)
+    row = out["results"][0]
+    assert row["passed"] and not row["violations"] and row["steps"] == 4  # three sends and the final answer
+    assert out["report"]["all"]["pass_rate"] == 1.0 and out["report"]["pairs"]["runs"] == 1
+    req = client.requests[0]
+    assert req["model"] == "claude-opus-5" and req["thinking"] == {"type": "adaptive"}
+    assert any(t["name"] == "gmail__send_email" for t in req["tools"])
+    assert client.requests[1]["messages"][2]["content"][0]["type"] == "tool_result"  # after the task and the calls
+    saved = json.loads((tmp_path / "runs" / "task-delegation.allowed.json").read_text())
+    replayed = EnvRun.from_export(saved["run"])
+    assert replayed.replay() == []  # the model's run replays exactly
+    assert replayed.grade()["passed"]

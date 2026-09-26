@@ -359,6 +359,31 @@ Over HTTP: `/envs/{id}/journal`, `/checkpoint`, `/branch`, `/counterfactual`, `/
 `/mutate`, `/components`, `/export`, `/save`; `/envs/import`, `/envs/load`. Changes made outside the world's API (an agent editing files directly) can't be
 replayed, only checkpointed; RL episodes checkpoint after every step when a run has components.
 
+## Datasets: benchmarks on worlds
+
+`datasets/` puts two recent benchmarks' ideas on toolsim worlds and adds splits only a world
+runtime can make (details in each folder's README):
+
+| dataset | items | from |
+|---|---|---|
+| `automationbench` | 244 | [AutomationBench](https://github.com/zapier/AutomationBench) (MIT): every public task whose apps toolsim simulates, graded by its own assertions |
+| `automationbench-runtime` | 1104 perturbed, 241 resume | those tasks with a planted injection, an impersonated colleague, flaky/down APIs or a timeout-after-send (**mutate**), or started half-way through a reference run (**snapshot, fork**) |
+| `safety` | 10 pairs (20 worlds) | original scenarios on [ClawsBench](https://github.com/benchflow-ai/ClawsBench)'s themes, each a **counterfactual** pair: the sensitive action is right in one world and unauthorized in the other |
+
+```bash
+pip install 'toolsim[bench]'; export ANTHROPIC_API_KEY=...
+toolsim eval datasets/automationbench --model claude-opus-5 --limit 20 -o results/ab
+toolsim eval datasets/automationbench-runtime --only resume,injection
+toolsim eval datasets/safety
+```
+
+`eval` reports pass rate (AutomationBench's metric), mean partial credit and unauthorized action
+rate per split, plus pair accuracy for the safety pairs. Every run is saved with its journal
+(`results/runs/<item>.json`), so a result can be **replayed** exactly, forked at any step or
+regraded. Grading AutomationBench tasks needs its code (`TOOLSIM_AUTOMATIONBENCH=<checkout>`).
+Plug-in graders (`toolsim.graders`) run any benchmark's own rubric on a toolsim world, and
+`history:` starts an environment part-way through another run.
+
 ## Real clients: gog, gh, Hermes, OpenClaw
 
 Agents like OpenClaw and Hermes don't call MCP servers for Google and GitHub; they run CLIs
@@ -438,6 +463,8 @@ src/toolsim/
   noise.py       shared pools for generated worlds; dispatches to each tool's noise.py
   importers/     the import registry and shared options
   rl/            episodes (ToolEnv), parallel pool (EnvPool), task families (rl/tasks/)
+  bench/         other benchmarks on worlds (AutomationBench), runtime splits, safety pairs, the eval runner
+  graders.py     plug-in graders (a benchmark's own rubric)
   api/           REST surfaces: routing, Google helpers, the HTTP handler, a GraphQL executor
   gateway/       the HTTPS gateway (CA, proxy) for real clients
   host.py        HTTP host (MCP endpoints and control API)

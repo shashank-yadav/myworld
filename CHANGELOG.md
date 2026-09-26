@@ -4,6 +4,12 @@ Service behavior is versioned separately by date (`toolsim versions`); this file
 
 ## Unreleased
 
+- **Datasets on worlds:** AutomationBench's public tasks on toolsim (244, graded by its own
+  assertions through a plug-in grader); runtime splits (1104 perturbed: injection, lookalike,
+  flaky, outage, timeout-after-send; 241 resume: half a reference run done); 10 counterfactual
+  safety pairs on ClawsBench's themes. `toolsim eval` runs Claude on any of them and saves
+  replayable runs. Environments can start part-way (`history:`); Drive and Notion seeds may fix ids.
+
 - **Working-condition fixes (found running real processes):** agents' credentials survive host
   restarts (the signing key is kept with the store or the CA); a loaded real-time run catches up to
   the wall clock; the journal records the passage of time only when something happened (2 entries

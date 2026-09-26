@@ -26,6 +26,9 @@ gateway = [
     "cryptography>=42",
     "graphql-core>=3.2",
 ]
+bench = [
+    "anthropic>=0.83",
+]
 
 [tool.uv.build-backend]
 module-name = "toolsim"
