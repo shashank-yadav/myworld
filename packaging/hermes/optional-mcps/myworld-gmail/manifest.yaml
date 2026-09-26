@@ -12,7 +12,7 @@ transport:
   type: stdio
   command: uvx
   args:
-    - myworld
+    - myworld==0.2.1
     - stdio
     - gmail
 

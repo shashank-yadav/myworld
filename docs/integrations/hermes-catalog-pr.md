@@ -13,7 +13,7 @@ packaging/hermes/optional-mcps/myworld/manifest.yaml
 It launches:
 
 ```text
-uvx myworld world invoice-review
+uvx myworld==0.2.1 world invoice-review
 ```
 
 That gives Hermes one MCP server with namespaced tools such as
@@ -74,7 +74,7 @@ Adds myworld practice-world MCP catalog entries:
 myworld is a safe practice world for real agent work. The main entry launches a
 shared invoice-review company world over stdio with:
 
-  uvx myworld world invoice-review
+  uvx myworld==0.2.1 world invoice-review
 
 It exposes Gmail, Slack and Drive tools in one MCP server, with namespaced tools
 and shared state, snapshots, forks, call logs and grading. No real inboxes,
@@ -84,8 +84,9 @@ The service-specific entries are included as smaller sandboxes for users who
 want only Gmail, Drive, Slack, Calendar, GitHub, Jira, Linear or Notion.
 
 Validation:
-- `uvx myworld world invoice-review` launches and exposes Gmail, Slack and Drive
-- `uvx myworld stdio gmail` launches for single-service use
+- `uvx --refresh --from myworld==0.2.1 myworld world invoice-review` launches and exposes Gmail, Slack and Drive
+- `uvx --from myworld==0.2.1 myworld stdio gmail` launches for single-service use
+- Hermes catalog test passed: `uv run --group dev pytest tests/hermes_cli/test_mcp_catalog.py -q`
 - `hermes mcp add myworld-gmail --command uvx --args myworld stdio gmail`
   discovered 19 tools locally
 - `hermes mcp test myworld-gmail` passed locally
