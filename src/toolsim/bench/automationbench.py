@@ -44,10 +44,10 @@ def _import_ab(path: str | Path | None = None) -> types.ModuleType:
     path = path or os.environ.get("TOOLSIM_AUTOMATIONBENCH")
     if path and str(path) not in sys.path:
         sys.path.insert(0, str(Path(path).expanduser()))
-    if "datasets" not in sys.modules:  # its task loaders wrap lists in HF datasets; a list will do
+    if not hasattr(sys.modules.get("datasets"), "Dataset"):  # its task loaders wrap lists in HF datasets
         try:
-            import datasets  # noqa: F401
-        except ImportError:
+            from datasets import Dataset  # noqa: F401
+        except ImportError:  # (or this repo's datasets/ folder shadows the name): a list will do
             stub = types.ModuleType("datasets")
 
             class Dataset(list):

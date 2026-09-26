@@ -6,7 +6,7 @@
 
 A grader is ``fn(env, spec, worlds, answer) -> {"checks": [...], "score": float, "passed": bool,
 "extra": {...}}``. Its checks are listed with the environment's own; ``score`` (when the
-environment has no checks of its own) and ``passed`` are the grader's verdict; ``extra`` is
+environment's own checks are all ``must`` constraints) and ``passed`` are the grader's verdict; ``extra`` is
 merged into the grade (e.g. ``partial_credit``).
 """
 

@@ -90,6 +90,7 @@ class Environment:
     time_set: bool = False      # whether the spec chose a clock (otherwise a host may apply its default)
     components: dict[str, dict[str, Any]] = field(default_factory=dict)  # directories, databases, remote (toolsim.world)
     graders: list[dict[str, Any]] = field(default_factory=list)  # plug-in graders (toolsim.graders), e.g. a benchmark's own
+    history: list[dict[str, Any]] = field(default_factory=list)  # journal entries already done: a run starts after them
 
     def to_dict(self, materialize: bool = False) -> dict[str, Any]:
         """The spec for this environment (``from_dict`` builds it back). ``materialize`` writes
@@ -116,6 +117,8 @@ class Environment:
             out["components"] = dict(self.components)
         if self.graders:
             out["graders"] = list(self.graders)
+        if self.history:
+            out["history"] = list(self.history)
         return out
 
     @classmethod
@@ -172,6 +175,9 @@ class Environment:
                 raise ValueError(f"check {c.get('name')!r}: weight must be a non-negative number")
         for n, ev in enumerate(spec.get("events") or []):
             _validate_event(ev, n, servers, components)
+        history = spec.get("history") or []
+        if not isinstance(history, list) or not all(isinstance(e, dict) and e.get("kind") for e in history):
+            raise ValueError("history must be a list of journal entries (as a run's journal records them)")
         from .graders import grader
         for g in spec.get("graders") or []:
             if not isinstance(g, dict) or not g.get("use"):
@@ -192,7 +198,8 @@ class Environment:
                    events=list(spec.get("events") or []), ambient=_ambient_spec(spec.get("ambient"), servers),
                    speed=parse_time(spec.get("time")), time_set="time" in spec,
                    components={k: dict(v or {}) for k, v in components.items()},
-                   graders=[dict(g) for g in spec.get("graders") or []])
+                   graders=[dict(g) for g in spec.get("graders") or []],
+                   history=[dict(e) for e in history])
 
     def agent_servers(self, agent: str) -> list[str]:
         return list(self.agents[agent].get("servers") or self.servers)
@@ -281,7 +288,7 @@ class Environment:
             results.append({"name": c.get("name") or _describe(c), "passed": ok, "matched": n,
                             "expected": {k: c[k] for k in ("count", "min", "max") if k in c} or {"min": 1},
                             "weight": float(c.get("weight", 1)), "must": bool(c.get("must"))})
-        native = len(results)
+        native = list(results)
         graded = []
         if self.graders:
             from .graders import grader
@@ -291,8 +298,9 @@ class Environment:
                 results += [{"weight": 1.0, "must": False, **r} for r in out.get("checks", [])]
         total = sum(r["weight"] for r in results)
         score = sum(r["weight"] for r in results if r["passed"]) / total if total else 1.0
-        if graded and not native and all("score" in g for g in graded):
-            score = sum(g["score"] for g in graded) / len(graded)  # e.g. a benchmark's own partial credit
+        if graded and all(r["must"] for r in native) and all("score" in g for g in graded):
+            # a benchmark's own score (e.g. partial credit); the environment's checks are only constraints
+            score = sum(g["score"] for g in graded) / len(graded)
         passed = all(r["passed"] for r in results) and all(g.get("passed", True) for g in graded)
         violated = [r["name"] for r in results if r["must"] and not r["passed"]]
         out = {"environment": self.name, "passed": passed, "score": score,
@@ -622,9 +630,20 @@ class EnvRun:
                         raise ValueError(f"agent {agent!r} on {server}: {e}") from None
         with self.lock:
             self._due_by_time()  # events without a trigger are part of the starting world
+            self._play_history()
             self._initial_components = {n: self.world.components[n].snapshot() for n in env.components}
             self.world.journal.clear()
             self.world.checkpoints[0] = None  # the start: rebuilt from the spec when needed (see _checkpoint)
+
+    def _play_history(self) -> None:
+        """A world that starts part-way through (``history``, e.g. a fork of another run): its entries
+        are replayed exactly, and the run's own journal starts after them."""
+        if not self.env.history:
+            return
+        diverged = self._replay(self.env.history)
+        if diverged:
+            raise ValueError(f"history doesn't replay on this environment (first divergence: {diverged[0]})")
+        self._time_logged = self.clock.now
 
     @property
     def journal(self) -> list[dict[str, Any]]:
@@ -653,6 +672,8 @@ class EnvRun:
             self.world.checkpoints.clear()
             self._time_logged = self.start
             self._due_by_time()
+            self._play_history()
+            self.world.journal.clear()
             self.world.checkpoints[0] = None
 
     def snapshot(self) -> dict[str, Any]:

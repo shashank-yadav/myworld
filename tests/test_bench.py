@@ -6,6 +6,7 @@ https://github.com/zapier/AutomationBench>; they're skipped otherwise.
 
 import copy
 import os
+from pathlib import Path
 
 import pytest
 
@@ -96,3 +97,54 @@ def test_reference_solutions_pass_through_real_tools(ab_tasks):
         assert g["partial_credit"] == g["score"]
         full += g["passed"]
     assert full >= 228  # the rest need exact counts or times the reference solver doesn't derive
+
+
+def test_history_starts_a_run_part_way():
+    spec = {"name": "h", "task": "t", "servers": {"gmail": {}}}
+    run = EnvRun(Environment.from_dict(spec))
+    run.instances["gmail"].call("send_email", {"to": ["john@acme.com"], "subject": "One", "body": "1"})
+    run.instances["gmail"].call("send_email", {"to": ["john@acme.com"], "subject": "Two", "body": "2"})
+    later = EnvRun(Environment.from_dict({**spec, "history": run.journal[:1]}))
+    sent = lambda r: sorted(m["subject"] for m in r.instances["gmail"].state["mailboxes"]["alex@acme.com"]["messages"].values()  # noqa: E731
+                            if "SENT" in m["labelIds"] and m["subject"] in ("One", "Two"))
+    assert sent(later) == ["One"] and later.journal == []
+    later.reset()
+    assert sent(later) == ["One"]
+    bad = copy.deepcopy(run.journal[:1])
+    bad[0]["result_sha"] = "0" * 16
+    with pytest.raises(ValueError, match="doesn't replay"):
+        EnvRun(Environment.from_dict({**spec, "history": bad}))
+
+
+@needs_ab
+def test_runtime_splits(tmp_path):
+    from toolsim.bench import automationbench as ab
+    from toolsim.bench import splits
+    src = tmp_path / "base"
+    src.mkdir()
+    lines = (Path(__file__).parent.parent / "datasets/automationbench/hr.jsonl").read_text().splitlines()[:12]
+    (src / "hr.jsonl").write_text("\n".join(lines) + "\n")
+    summary = splits.build(src, tmp_path / "runtime", ab.oracle)
+    assert summary["total"]["perturbed"] >= 40 and summary["total"]["resume"] >= 10
+    specs = {s["name"]: s for s in splits.load(tmp_path / "runtime")}
+    bases = {s["name"]: s for s in splits.load(src)}
+    for name, spec in specs.items():
+        base = bases[name.rsplit(".", 1)[0]]
+        if name.endswith((".injection", ".lookalike")):  # doing the task doesn't trip the trap
+            run = EnvRun(Environment.from_dict(spec, base_dir=None))
+            ab.oracle(run)
+            g = run.grade()
+            assert not g["violations"], (name, g["violations"])
+        if name.endswith(".resume"):
+            full = EnvRun(Environment.from_dict(base, base_dir=None))
+            ab.oracle(full)
+            done = len(spec["history"])
+            rest = EnvRun(Environment.from_dict(spec, base_dir=None))
+            assert rest.grade()["score"] < full.grade()["score"]
+            assert rest._replay(full.journal[done:]) == []  # finishing the reference path
+            g = rest.grade()
+            assert g["score"] == full.grade()["score"] and not g["violations"]
+            if any(c["name"].startswith("didn't email") for c in spec["checks"]):
+                again = EnvRun(Environment.from_dict(spec, base_dir=None))
+                ab.oracle(again)  # starting over redoes what was done
+                assert again.grade()["reward"] == 0.0

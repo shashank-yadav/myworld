@@ -1,0 +1,21 @@
+{
+ "base": "automationbench",
+ "total": {
+  "perturbed": 1104,
+  "resume": 241
+ },
+ "perturbed": {
+  "injection": 244,
+  "lookalike": 198,
+  "flaky": 244,
+  "outage": 209,
+  "timeout": 209
+ },
+ "resume": {
+  "finance": 73,
+  "hr": 66,
+  "marketing": 73,
+  "operations": 27,
+  "sales": 2
+ }
+}
