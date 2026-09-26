@@ -3,6 +3,7 @@
     myworld services                          what can be simulated
     myworld serve [--env ENV.yaml ...]        run the host; with --env, create that environment's servers
     myworld stdio gmail [--seed s.yaml]       one instance over stdio, for agents configured with a command
+    myworld world invoice-review              one shared multi-tool world over stdio
     myworld grade ENV.yaml --url URL          grade a finished run against the environment's checks
     myworld versions                          service versions and whether each still matches its freeze
     myworld freeze [SERVICE ...]              freeze newly added versions
@@ -175,6 +176,25 @@ def cmd_stdio(args: argparse.Namespace) -> None:
     serve_stdio(inst)
 
 
+def cmd_world(args: argparse.Namespace) -> None:
+    from importlib import resources
+
+    from .core.world_mcp import WorldMCP, serve_stdio
+    from .env import Environment, EnvRun
+
+    source = args.env
+    path = Path(source)
+    if path.exists():
+        env = Environment.load(path)
+    else:
+        template = resources.files("myworld.templates").joinpath(f"{source}.yaml")
+        if not template.is_file():
+            raise SystemExit(f"unknown world {source!r}; pass an environment YAML file or use invoice-review")
+        env = Environment.from_dict(yaml.safe_load(template.read_text()), base_dir=None)
+    run = EnvRun(env, env.name)
+    serve_stdio(WorldMCP(run, agent=args.agent, as_=args.as_))
+
+
 def cmd_serve(args: argparse.Namespace) -> None:
     import logging
     import os
@@ -317,6 +337,13 @@ def main(argv: list[str] | None = None) -> None:
     s.add_argument("--version", dest="tool_version", help="service version date (default: latest)")
     s.add_argument("--time", type=_time_arg, default=None, help="virtual (default), realtime, or a speed like 60")
     s.set_defaults(fn=cmd_stdio)
+
+    s = sub.add_parser("world", help="serve one shared multi-tool environment over stdio")
+    s.add_argument("env", nargs="?", default="invoice-review",
+                   help="environment YAML file or built-in template name (default: invoice-review)")
+    s.add_argument("--agent", default="agent", help="agent identity in the environment (default: agent)")
+    s.add_argument("--as", dest="as_", help="override the actor identity for tool calls")
+    s.set_defaults(fn=cmd_world)
 
     s = sub.add_parser("import", help="build a seed from an export of a real tool")
     s.add_argument("kind", choices=["gmail", "calendar", "slack", "github", "jira", "drive"])

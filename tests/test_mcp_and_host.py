@@ -4,6 +4,8 @@ import json
 from fastapi.testclient import TestClient
 
 from myworld.core import mcp
+from myworld.core.world_mcp import WorldMCP, handle as world_handle, serve_stdio as serve_world_stdio
+from myworld.env import Environment, EnvRun
 from myworld.core.instance import Instance
 from myworld.host import create_app
 from myworld.services import get_service
@@ -40,6 +42,42 @@ def test_stdio_transport():
     assert [l.get("id") for l in lines] == [1, 2, None]
     assert len(lines[1]["result"]["tools"]) == 8
     assert lines[2]["error"]["code"] == -32700
+
+
+def test_world_mcp_exposes_one_shared_multi_tool_world():
+    env = Environment.load("examples/worlds/invoice-review.yaml")
+    w = WorldMCP(EnvRun(env))
+    init = world_handle(w, {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}})
+    assert init["result"]["serverInfo"]["name"] == "myworld"
+    tools = world_handle(w, {"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]
+    names = {t["name"] for t in tools}
+    assert {"world_task", "world_grade", "gmail__search_emails", "slack__slack_get_channel_history",
+            "drive__read_sheet_values"} <= names
+
+    task = world_handle(w, {"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                            "params": {"name": "world_task", "arguments": {}}})["result"]
+    assert "vendor invoices" in task["content"][0]["text"]
+    mail = world_handle(w, {"jsonrpc": "2.0", "id": 4, "method": "tools/call",
+                            "params": {"name": "gmail__search_emails",
+                                       "arguments": {"query": "subject:Invoice"}}})["result"]
+    assert not mail["isError"]
+    assert "global-logistics.example" in mail["content"][0]["text"]
+
+
+def test_world_stdio_transport():
+    env = Environment.load("examples/worlds/invoice-review.yaml")
+    stdin = io.StringIO("\n".join(json.dumps(m) for m in [
+        {"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}},
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "world_snapshot", "arguments": {}}},
+    ]) + "\n")
+    out = io.StringIO()
+    serve_world_stdio(WorldMCP(EnvRun(env)), stdin, out)
+    lines = [json.loads(l) for l in out.getvalue().splitlines()]
+    assert [l.get("id") for l in lines] == [1, 2, 3]
+    assert any(t["name"] == "drive__modify_sheet_values" for t in lines[1]["result"]["tools"])
+    assert "snapshot_id" in lines[2]["result"]["content"][0]["text"]
 
 
 def test_host_runs_isolated_instances_with_control_plane():

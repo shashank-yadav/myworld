@@ -20,7 +20,7 @@ uv run myworld serve --env envs/schedule-with-john.yaml
 For MCP clients that spawn tools directly:
 
 ```bash
-uvx myworld stdio gmail
+uvx myworld world invoice-review
 ```
 
 ## Why
@@ -104,7 +104,8 @@ graders and RL loops.
 
 Useful entry points:
 
-- local stdio MCP: `myworld stdio gmail`
+- local shared-world MCP: `myworld world invoice-review`
+- local single-service MCP: `myworld stdio gmail`
 - hosted or local HTTP MCP: `myworld serve --env ...`
 - OpenAPI / REST control endpoints
 - API-compatible gateways for real Google/GitHub clients
@@ -127,13 +128,13 @@ uv run myworld bench -n 200 --workers 8            # play the reference solution
 ## Publishing Checklist
 
 - [x] Package and CLI use the `myworld` name.
-- [x] Local stdio MCP works for single-service practice.
+- [x] Local stdio MCP works for shared multi-tool worlds and single-service practice.
 - [x] HTTP host returns MCP configs for multi-service worlds.
 - [x] REST control plane supports create, snapshot, fork, replay inputs, diff inputs and grading.
 - [x] Dockerfile runs the myworld host with token protection when exposed.
 - [x] Hermes config example exists in `examples/hermes/`.
 - [x] OpenClaw install script exists in `examples/openclaw/`.
-- [ ] Publish `myworld` to PyPI for `uvx myworld`.
+- [x] Publish `myworld` to PyPI for `uvx myworld`.
 - [ ] Publish `ghcr.io/<org>/myworld`.
 - [ ] Deploy a hosted MCP endpoint at `https://api.myworld.dev/mcp`.
 - [ ] Add release smoke tests against Hermes and `openclaw mcp doctor --probe`.

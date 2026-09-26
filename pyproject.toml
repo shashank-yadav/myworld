@@ -1,6 +1,6 @@
 [project]
 name = "myworld"
-version = "0.2.0"
+version = "0.2.1"
 description = "Simulated replicas of real tools (Gmail, Calendar, Slack, GitHub, ...) for testing and training AI agents"
 readme = "README.md"
 requires-python = ">=3.11"

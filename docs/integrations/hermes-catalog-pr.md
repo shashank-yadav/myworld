@@ -4,7 +4,26 @@ Hermes catalog entries live in the Hermes Agent repository under
 `optional-mcps/<name>/manifest.yaml`. A merged manifest means Nous has reviewed
 and approved the MCP for one-click installation.
 
-The myworld catalog entries are:
+The primary myworld catalog entry is one shared practice world:
+
+```text
+packaging/hermes/optional-mcps/myworld/manifest.yaml
+```
+
+It launches:
+
+```text
+uvx myworld world invoice-review
+```
+
+That gives Hermes one MCP server with namespaced tools such as
+`gmail__search_emails`, `slack__slack_get_channel_history`,
+`drive__read_sheet_values`, plus `world_task`, `world_grade`, `world_snapshot`
+and `world_diff`. Gmail, Slack and Drive all share the same seeded company,
+clock, call log, snapshots, forks and grader.
+
+The repo also keeps service-specific entries for users who want a small
+single-tool sandbox:
 
 ```text
 packaging/hermes/optional-mcps/myworld-calendar/manifest.yaml
@@ -23,9 +42,10 @@ To submit it:
 git clone https://github.com/NousResearch/hermes-agent.git /tmp/hermes-agent
 cd /tmp/hermes-agent
 git checkout -b add-myworld-mcp-worlds
+cp -R /path/to/myworld/packaging/hermes/optional-mcps/myworld optional-mcps/
 cp -R /path/to/myworld/packaging/hermes/optional-mcps/myworld-* optional-mcps/
 python -m pytest tests/hermes_cli/test_mcp_catalog.py -q
-git add optional-mcps/myworld-*
+git add optional-mcps/myworld optional-mcps/myworld-*
 git commit -m "Add myworld MCP catalog entries"
 git push -u <your-fork> add-myworld-mcp-worlds
 ```
@@ -41,6 +61,7 @@ PR body:
 ```text
 Adds myworld practice-world MCP catalog entries:
 
+- myworld
 - myworld-calendar
 - myworld-drive
 - myworld-github
@@ -50,21 +71,21 @@ Adds myworld practice-world MCP catalog entries:
 - myworld-notion
 - myworld-slack
 
-myworld is a safe practice world for real agent work. Each entry launches the
-PyPI package over stdio with:
+myworld is a safe practice world for real agent work. The main entry launches a
+shared invoice-review company world over stdio with:
 
-  uvx myworld stdio <service>
+  uvx myworld world invoice-review
 
-These servers expose simulated company tools. No real inboxes, calendars,
-repositories, Jira projects, Linear workspaces, Notion pages, Slack workspaces,
-Drive files, Docs or Sheets are changed.
+It exposes Gmail, Slack and Drive tools in one MCP server, with namespaced tools
+and shared state, snapshots, forks, call logs and grading. No real inboxes,
+Slack workspaces, Drive files, Docs or Sheets are changed.
 
-The default enabled tool sets are intentionally focused so users can try
-realistic workflows without loading every available tool. Users can opt into
-the rest with `hermes mcp configure <entry>`.
+The service-specific entries are included as smaller sandboxes for users who
+want only Gmail, Drive, Slack, Calendar, GitHub, Jira, Linear or Notion.
 
 Validation:
-- `uvx myworld stdio gmail` launches
+- `uvx myworld world invoice-review` launches and exposes Gmail, Slack and Drive
+- `uvx myworld stdio gmail` launches for single-service use
 - `hermes mcp add myworld-gmail --command uvx --args myworld stdio gmail`
   discovered 19 tools locally
 - `hermes mcp test myworld-gmail` passed locally

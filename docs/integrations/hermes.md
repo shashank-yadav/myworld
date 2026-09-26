@@ -9,17 +9,19 @@ Use this when Hermes and myworld run on the same machine.
 
 ```yaml
 mcp_servers:
-  myworld_gmail:
+  myworld:
     command: "uvx"
-    args: ["myworld", "stdio", "gmail"]
+    args: ["myworld", "world", "invoice-review"]
     tools:
-      include: ["search_emails", "read_email", "send_email"]
+      include: ["world_*", "gmail__*", "slack__*", "drive__*"]
       resources: false
       prompts: false
 ```
 
-This starts one Gmail-shaped practice server over stdio. It is a small first test, useful for
-checking that Hermes can discover tools and call them.
+This starts one shared invoice-review company world over stdio. Hermes sees one MCP server with
+namespaced Gmail, Slack and Drive tools, plus world tools for task, grading, snapshots and diffs.
+
+For a tiny single-service smoke test, use `uvx myworld stdio gmail`.
 
 ## Hosted Or Multi-Service Worlds
 
@@ -43,8 +45,9 @@ mcp_servers:
       prompts: false
 ```
 
-For full company worlds, add the other printed MCP servers (`drive`, `slack`, `calendar`, etc.) or
-use the hosted myworld endpoint once it is deployed.
+For full company worlds over HTTP, add the other printed MCP servers (`drive`, `slack`, `calendar`,
+etc.) or use the hosted myworld endpoint once it is deployed. For local stdio, prefer
+`myworld world <env.yaml>` when you want one shared multi-tool world.
 
 ## Publish Checklist
 
@@ -53,4 +56,3 @@ use the hosted myworld endpoint once it is deployed.
 - Keep the default examples narrow and low-risk.
 - Document tool filters for every example.
 - Add a smoke test that runs Hermes against `tools/list` and one real task.
-

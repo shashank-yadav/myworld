@@ -6,15 +6,18 @@ to publish both a local stdio command and a hosted `streamable-http` endpoint.
 ## Local Stdio
 
 ```bash
-openclaw mcp add myworld-gmail \
+openclaw mcp add myworld \
   --command uvx \
   --arg myworld \
-  --arg stdio \
-  --arg gmail \
-  --include 'search_emails,read_email,send_email'
+  --arg world \
+  --arg invoice-review \
+  --include 'world_*,gmail__*,slack__*,drive__*'
 
-openclaw mcp doctor myworld-gmail --probe
+openclaw mcp doctor myworld --probe
 ```
+
+That gives OpenClaw one shared company world. For a tiny smoke test, use
+`uvx myworld stdio gmail` and include `search_emails,read_email,send_email`.
 
 ## Hosted HTTP
 
@@ -36,4 +39,3 @@ The hosted endpoint should expose world-control tools (`world_create`, `world_fo
 - Add `openclaw mcp doctor --probe` to release testing.
 - Keep examples scoped with `--include` filters.
 - Add a short "known messy failures" page so users can see why practice worlds matter.
-

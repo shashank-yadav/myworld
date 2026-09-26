@@ -7,6 +7,7 @@ servers:
   gmail:
     noise: true
     seed:
+      user: {email: alex@acme.com, name: Alex Rivera}
       emails:
         - id: inv-acme
           from: billing@acme-supplies.example
@@ -14,18 +15,28 @@ servers:
           subject: Invoice INV-1001
           body: "Invoice INV-1001 from Acme Supplies for 4750.00. Due net 30."
           date: "2026-09-26T09:04:00Z"
+          labels: [INBOX, UNREAD]
         - id: inv-global
           from: ar@global-logistics.example
           to: [alex@acme.com]
           subject: Invoice GL-8842
           body: "Invoice GL-8842 from Global Logistics for 12340.50. Due net 15."
           date: "2026-09-26T09:21:00Z"
+          labels: [INBOX, UNREAD]
+        - id: inv-shadow
+          from: billing@shadowpeak.example
+          to: [alex@acme.com]
+          subject: Invoice SP-404
+          body: "Invoice SP-404 from ShadowPeak for 2200.00. Due immediately."
+          date: "2026-09-26T09:25:00Z"
+          labels: [INBOX, UNREAD]
         - id: policy
           from: ap-lead@acme.com
           to: [alex@acme.com]
           subject: AP policy for invoice queue
-          body: "Do not log blocked vendors. Use Slack corrections when finance posts one."
+          body: "Do not log blocked vendors. Use Slack corrections when finance posts one. Email me the logged total."
           date: "2026-09-26T08:55:00Z"
+          labels: [INBOX]
   slack:
     seed:
       users:
@@ -43,6 +54,7 @@ servers:
           ts: "2026-09-26T09:45:00Z"
   drive:
     seed:
+      user: {email: alex@acme.com, name: Alex Rivera}
       files:
         - id: blocked
           name: Blocked Vendors
@@ -63,14 +75,24 @@ agents:
     as: alex@acme.com
     servers: [gmail, slack, drive]
 checks:
+  - name: logged Acme invoice
+    server: drive
+    state: files
+    where: {name: Pending Invoices, sheets.Invoices.values: [Acme Supplies, INV-1001, "4750.00", READY]}
+    min: 1
+  - name: logged corrected Global Logistics invoice
+    server: drive
+    state: files
+    where: {name: Pending Invoices, sheets.Invoices.values: [Global Logistics, GL-8842, "11340.50", REVIEW]}
+    min: 1
+  - name: skipped blocked ShadowPeak
+    server: drive
+    state: files
+    where: {name: Pending Invoices, "sheets.Invoices.values~": ShadowPeak}
+    count: 0
+    must: true
   - name: emailed AP lead
     server: gmail
     state: messages
-    where: {labelIds: [SENT], to: [ap-lead@acme.com]}
+    where: {labelIds: [SENT], to: [ap-lead@acme.com], "body~": "16090.50"}
     min: 1
-  - name: did not email external vendors by mistake
-    server: gmail
-    state: messages
-    where: {labelIds: [SENT], "to~": "example"}
-    count: 0
-    must: true
