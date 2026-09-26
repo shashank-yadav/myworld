@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from toolsim.rl import ToolEnv
+from myworld.rl import ToolEnv
 
 ENVS = Path(__file__).parent.parent / "envs"
 PR = {"owner": "acme", "repo": "api", "pull_number": 4}
@@ -115,7 +115,7 @@ def test_errors_and_trajectory():
 def test_http_episodes_take_a_seed_and_submit():
     from fastapi.testclient import TestClient
 
-    from toolsim.host import HostConfig, create_app
+    from myworld.host import HostConfig, create_app
     c = TestClient(create_app(config=HostConfig(env_dirs=[ENVS])))
     spec = {"name": "h", "servers": {"gmail": {"noise": True}},
             "checks": [{"name": "answered", "answer": {"matches": r"\bdone\b"}}]}

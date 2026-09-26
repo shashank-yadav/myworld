@@ -1,10 +1,10 @@
 import pytest
 
-from toolsim.core.instance import Instance, Service
-from toolsim.core.tools import tool
-from toolsim.env import Environment, EnvRun
-from toolsim.services import SERVICES, get_service
-from toolsim.versions import check_all, fingerprint
+from myworld.core.instance import Instance, Service
+from myworld.core.tools import tool
+from myworld.env import Environment, EnvRun
+from myworld.services import SERVICES, get_service
+from myworld.versions import check_all, fingerprint
 
 
 def test_every_released_version_still_matches_its_freeze():
@@ -55,6 +55,6 @@ def test_environments_pin_versions():
     assert EnvRun(env).instances["gmail"].version == "2026-09-25"
     with pytest.raises(ValueError, match="no version"):
         Environment.from_dict({"name": "e", "servers": {"gmail": {"version": "1999-01-01"}}})
-    from toolsim.core import mcp
+    from myworld.core import mcp
     info = mcp.handle(Instance(get_service("slack")), {"jsonrpc": "2.0", "id": 1, "method": "initialize"})
     assert info["result"]["serverInfo"]["version"] == SERVICES["slack"].latest_version()

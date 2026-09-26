@@ -1,0 +1,9 @@
+mcp_servers:
+  myworld_gmail:
+    command: "uvx"
+    args: ["myworld", "stdio", "gmail"]
+    tools:
+      include: ["search_emails", "read_email", "send_email"]
+      resources: false
+      prompts: false
+

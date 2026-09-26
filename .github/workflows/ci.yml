@@ -20,5 +20,5 @@ jobs:
       - run: uvx ruff check src tests
       - run: uv run pytest -q
       - name: released tool versions still match their freeze
-        run: uv run toolsim versions | tee /dev/stderr | grep -qv "✗"
+        run: uv run myworld versions | tee /dev/stderr | grep -qv "✗"
       - run: uv build

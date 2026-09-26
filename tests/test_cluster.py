@@ -2,8 +2,8 @@
 
 from fastapi.testclient import TestClient
 
-from toolsim.cluster import Cluster, create_coordinator
-from toolsim.host import HostConfig, create_app
+from myworld.cluster import Cluster, create_coordinator
+from myworld.host import HostConfig, create_app
 
 SPEC = {"name": "support", "servers": {"gmail": {}},
         "components": {"db": {"type": "sqlite", "sql": "CREATE TABLE t(id INTEGER PRIMARY KEY, v TEXT);"}}}

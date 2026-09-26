@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 import pytest
 from fastapi.testclient import TestClient
 
-from toolsim.host import HostConfig, create_app
+from myworld.host import HostConfig, create_app
 
 ENVS = Path(__file__).parent.parent / "envs"
 
@@ -136,7 +136,7 @@ def test_identities_are_checked():
     url = urlsplit(ok["agents"]["agent"]["mcpServers"]["gmail"]["url"])
     r = c.post(f"{url.path}?agent=eve&as=eve@evil.io", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     assert r.status_code == 403
-    from toolsim.env import Environment
+    from myworld.env import Environment
     with pytest.raises(ValueError, match="unknown server"):
         Environment.from_dict({"name": "z", "servers": {"gmail": {}}, "agents": {"a": {"servers": ["slack"]}}})
 

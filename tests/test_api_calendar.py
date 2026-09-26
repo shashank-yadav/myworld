@@ -3,7 +3,7 @@
 import pytest
 from fastapi.testclient import TestClient
 
-from toolsim.host import HostConfig, create_app
+from myworld.host import HostConfig, create_app
 
 SPEC = {"name": "w", "servers": {"gmail": {}, "calendar": {"extend": {"auto_respond": {"priya@acme.com": "accept"}}}},
         "agents": {"alex": {"as": "alex@acme.com"}, "john": {"as": "john@acme.com"}}}

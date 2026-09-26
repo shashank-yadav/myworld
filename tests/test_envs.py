@@ -10,8 +10,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from toolsim.env import Environment
-from toolsim.host import Host, create_app
+from myworld.env import Environment
+from myworld.host import Host, create_app
 
 ENVS = Path(__file__).parent.parent / "envs"
 
@@ -140,7 +140,7 @@ def test_merge_survives_ambiguous_timeout(check_before_retry):
 
 
 def test_no_env_is_solved_before_anyone_acts():
-    from toolsim.env import Environment, EnvRun
+    from myworld.env import Environment, EnvRun
     for f in sorted((Path(__file__).parent.parent / "envs").glob("*.yaml")):
         g = EnvRun(Environment.load(f)).grade()
         early = [c["name"] for c in g["checks"] if c["passed"] and c["expected"].get("min", 0) >= 1]

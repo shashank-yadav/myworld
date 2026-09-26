@@ -8,11 +8,11 @@ from urllib.parse import urlsplit
 import pytest
 from fastapi.testclient import TestClient
 
-from toolsim.core import mcp
-from toolsim.core.instance import Instance
-from toolsim.env import Environment, EnvRun
-from toolsim.host import HostConfig, create_app
-from toolsim.services import get_service
+from myworld.core import mcp
+from myworld.core.instance import Instance
+from myworld.env import Environment, EnvRun
+from myworld.host import HostConfig, create_app
+from myworld.services import get_service
 
 ENVS = Path(__file__).parent.parent / "envs"
 EMAIL = {"to": ["john@acme.com"], "subject": "Q4 plan: Tue 10:00", "body": "Booked"}

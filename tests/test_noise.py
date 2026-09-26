@@ -4,9 +4,9 @@ import json
 
 import pytest
 
-from toolsim import noise
-from toolsim.env import Environment, EnvRun
-from toolsim.services import get_service
+from myworld import noise
+from myworld.env import Environment, EnvRun
+from myworld.services import get_service
 
 ALL = ["gmail", "slack", "calendar", "github", "jira", "drive", "linear", "notion"]
 AMBIENT = {"hours": 8, "gmail": 6, "slack": 20, "github": 2, "jira": 3, "calendar": 1, "linear": 2, "notion": 1}

@@ -10,11 +10,11 @@ from pathlib import Path
 
 import yaml
 
-from toolsim.cli import main as cli
-from toolsim.core.instance import Instance
-from toolsim.env import Environment
-from toolsim.importers import IMPORTERS, ImportOptions
-from toolsim.services import get_service
+from myworld.cli import main as cli
+from myworld.core.instance import Instance
+from myworld.env import Environment
+from myworld.importers import IMPORTERS, ImportOptions
+from myworld.services import get_service
 
 
 def world(kind: str, seed: dict) -> Instance:
@@ -262,7 +262,7 @@ def test_cli_import_into_an_environment(tmp_path):
     (tmp_path / "env.yaml").write_text(yaml.safe_dump({
         "name": "from-real-mail", "servers": {"gmail": {"seed_file": "seeds/gmail.yaml"}},
         "issues": [{"use": "prompt_injection_email"}]}))
-    from toolsim.env import EnvRun
+    from myworld.env import EnvRun
     run = EnvRun(Environment.load(tmp_path / "env.yaml"))  # issues fire into the imported (pseudonymized) mailbox
     g = run.instances["gmail"]
     inbox = g.call("search_emails", {"query": "newer_than:7d"}).text

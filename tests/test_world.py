@@ -6,9 +6,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from toolsim.env import Environment, EnvRun
-from toolsim.host import HostConfig, create_app
-from toolsim.world import DirectoryComponent, RemoteComponent, SQLiteComponent, World, serve_component
+from myworld.env import Environment, EnvRun
+from myworld.host import HostConfig, create_app
+from myworld.world import DirectoryComponent, RemoteComponent, SQLiteComponent, World, serve_component
 
 SCHEMA = "CREATE TABLE orders(id INTEGER PRIMARY KEY, customer TEXT, status TEXT);" \
          "INSERT INTO orders(customer, status) VALUES ('globex', 'paid'), ('initech', 'paid');"
@@ -179,7 +179,7 @@ def test_the_runtime_over_http():
 
 
 def test_the_store_shares_what_didnt_change_and_keeps_types(tmp_path):
-    from toolsim.world.store import Store
+    from myworld.world.store import Store
     st = Store(tmp_path / "w.db")
     value = {"issues": {4: {"title": "x" * 300}}, "rng": (3, (1, 2), None), "big": ["y" * 300, "z" * 300]}
     assert st.get(st.put(value)) == value, "integer keys and tuples survive"
@@ -217,7 +217,7 @@ def test_runs_move_between_hosts_and_survive_restarts(tmp_path):
 
 
 def test_any_machine_with_a_cli_is_a_component(tmp_path):
-    from toolsim.world import CommandComponent
+    from myworld.world import CommandComponent
     box = tmp_path / "box"
     box.mkdir()
     (box / "app.cfg").write_text("mode=a\n")
@@ -243,7 +243,7 @@ def test_any_machine_with_a_cli_is_a_component(tmp_path):
 
 def test_containers_via_docker(tmp_path, monkeypatch):
     import sys as _sys
-    from toolsim.world import DockerComponent
+    from myworld.world import DockerComponent
     fake = tmp_path / "docker"
     fake.write_text(f"#!/bin/sh\nexec {_sys.executable} {Path(__file__).parent / 'fake_docker.py'} \"$@\"\n")
     fake.chmod(0o755)

@@ -1,6 +1,6 @@
-"""Plug-in graders, and AutomationBench tasks on toolsim worlds.
+"""Plug-in graders, and AutomationBench tasks on myworld worlds.
 
-The AutomationBench tests need its code: TOOLSIM_AUTOMATIONBENCH=<checkout of
+The AutomationBench tests need its code: MYWORLD_AUTOMATIONBENCH=<checkout of
 https://github.com/zapier/AutomationBench>; they're skipped otherwise.
 """
 
@@ -11,10 +11,10 @@ from pathlib import Path
 
 import pytest
 
-from toolsim import graders
-from toolsim.env import Environment, EnvRun
+from myworld import graders
+from myworld.env import Environment, EnvRun
 
-AB = os.environ.get("TOOLSIM_AUTOMATIONBENCH")
+AB = os.environ.get("MYWORLD_AUTOMATIONBENCH")
 
 
 def test_plugin_grader_scores_the_run():
@@ -57,21 +57,21 @@ def test_seeds_can_fix_ids():
 
 # -- AutomationBench -------------------------------------------------------------------------------
 
-needs_ab = pytest.mark.skipif(not AB, reason="set TOOLSIM_AUTOMATIONBENCH to an AutomationBench checkout")
+needs_ab = pytest.mark.skipif(not AB, reason="set MYWORLD_AUTOMATIONBENCH to an AutomationBench checkout")
 
 
 @pytest.fixture(scope="module")
 def ab_tasks():
-    from toolsim.bench import automationbench as ab
+    from myworld.bench import automationbench as ab
     return [t for t in ab.load_tasks() if ab.supported(t)[0]]
 
 
 @needs_ab
 def test_every_assertion_agrees_on_the_starting_world(ab_tasks):
-    """Converted to toolsim and back, the world satisfies exactly the assertions it did before."""
+    """Converted to myworld and back, the world satisfies exactly the assertions it did before."""
     from automationbench.rubric.registry import AssertionRegistry
     from automationbench.schema.world import WorldState
-    from toolsim.bench import automationbench as ab
+    from myworld.bench import automationbench as ab
     assert len(ab_tasks) >= 240
     for t in ab_tasks:
         spec = ab.convert(t)
@@ -86,8 +86,8 @@ def test_every_assertion_agrees_on_the_starting_world(ab_tasks):
 
 @needs_ab
 def test_reference_solutions_pass_through_real_tools(ab_tasks):
-    """Doing what each task asserts, through toolsim's tools, passes AutomationBench's own grader."""
-    from toolsim.bench import automationbench as ab
+    """Doing what each task asserts, through myworld's tools, passes AutomationBench's own grader."""
+    from myworld.bench import automationbench as ab
     full = 0
     for t in ab_tasks:
         run = EnvRun(Environment.from_dict(ab.convert(t), base_dir=None))
@@ -119,8 +119,8 @@ def test_history_starts_a_run_part_way():
 
 @needs_ab
 def test_runtime_splits(tmp_path):
-    from toolsim.bench import automationbench as ab
-    from toolsim.bench import splits
+    from myworld.bench import automationbench as ab
+    from myworld.bench import splits
     src = tmp_path / "base"
     src.mkdir()
     lines = (Path(__file__).parent.parent / "datasets/automationbench/hr.jsonl").read_text().splitlines()[:12]
@@ -181,8 +181,8 @@ class _FakeClient:
 
 
 def test_runner_plays_a_model_and_saves_replayable_runs(tmp_path):
-    from toolsim.bench import pairs
-    from toolsim.bench.runner import Agent, evaluate
+    from myworld.bench import pairs
+    from myworld.bench.runner import Agent, evaluate
     spec = next(s for s in pairs.load(Path(__file__).parent.parent / "datasets/safety")
                 if s["name"] == "task-delegation.allowed")
     sends = [("priya@acme.com", "API rate limits"), ("tom@acme.com", "Billing migration"), ("nadia@acme.com", "Docs refresh")]
@@ -204,3 +204,52 @@ def test_runner_plays_a_model_and_saves_replayable_runs(tmp_path):
     replayed = EnvRun.from_export(saved["run"])
     assert replayed.replay() == []  # the model's run replays exactly
     assert replayed.grade()["passed"]
+
+
+def test_openrouter_runner_plays_tools_without_leaking_keys(tmp_path, monkeypatch):
+    from myworld.bench import pairs
+    from myworld.bench.runner import OpenRouterAgent, evaluate
+    spec = next(s for s in pairs.load(Path(__file__).parent.parent / "datasets/safety")
+                if s["name"] == "task-delegation.allowed")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "secret-test-key")
+    agent = OpenRouterAgent(model="qwen/qwen3-32b", compact_tools=True)
+    seen = []
+
+    def fake_chat(messages, tools):
+        seen.append({"messages": messages, "tools": tools})
+        if len(seen) == 1:
+            return {"choices": [{"message": {"content": "On it.", "tool_calls": [
+                {"id": "t0", "type": "function", "function": {"name": "gmail__send_email",
+                 "arguments": json.dumps({"to": ["priya@acme.com"], "subject": "Your sprint task",
+                                          "body": "API rate limits"})}},
+                {"id": "t1", "type": "function", "function": {"name": "gmail__send_email",
+                 "arguments": json.dumps({"to": ["tom@acme.com"], "subject": "Your sprint task",
+                                          "body": "Billing migration"})}},
+                {"id": "t2", "type": "function", "function": {"name": "gmail__send_email",
+                 "arguments": json.dumps({"to": ["nadia@acme.com"], "subject": "Your sprint task",
+                                          "body": "Docs refresh"})}},
+            ]}}], "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}}
+        return {"choices": [{"message": {"content": "Sent all three."}}],
+                "usage": {"prompt_tokens": 20, "completion_tokens": 3, "total_tokens": 23}}
+
+    agent._chat = fake_chat
+    out = evaluate([spec], agent, out=tmp_path, concurrency=1)
+    row = out["results"][0]
+    assert row["passed"] and row["usage"]["prompt_tokens"] == 30
+    assert row["diagnostics"]["top_tools"][0] == {"tool": "gmail__send_email", "calls": 3}
+    assert "description" not in json.dumps(seen[0]["tools"][0]["function"]["parameters"])
+    saved = (tmp_path / "runs" / "task-delegation.allowed.json").read_text()
+    assert "secret-test-key" not in saved
+
+
+def test_report_counts_errors_in_strict_pass_rate():
+    from myworld.bench.runner import report
+    rep = report([
+        {"name": "a", "kind": "base", "passed": True, "score": 1.0, "violations": [], "steps": 1},
+        {"name": "b", "kind": "base", "passed": False, "score": 0.5, "violations": [], "steps": 2},
+        {"name": "c", "kind": "base", "error": "boom"},
+    ])
+    assert rep["errors"] == 1 and rep["error_rate"] == pytest.approx(1 / 3)
+    assert rep["all"]["pass_rate"] == 0.5
+    assert rep["all"]["strict_pass_rate"] == pytest.approx(1 / 3)
+    assert rep["base"]["attempted"] == 3 and rep["base"]["errors"] == 1

@@ -1,4 +1,4 @@
-# Counterfactual safety pairs (toolsim.bench.pairs). Original scenarios on the themes ClawsBench
+# Counterfactual safety pairs (myworld.bench.pairs). Original scenarios on the themes ClawsBench
 # measures (confidential forwarding, impersonated approvals, wrong channel, over-broad cleanup,
 # cancellations, injected instructions, offboarding, coverage, delegation, changed addresses).
 # Each scenario has two worlds that differ in one fact; the sensitive action is right in one and

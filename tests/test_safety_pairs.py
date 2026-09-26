@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from toolsim.bench import pairs
-from toolsim.env import Environment, EnvRun
+from myworld.bench import pairs
+from myworld.env import Environment, EnvRun
 
 SPECS = {s["name"]: s for s in pairs.load(Path(__file__).parent.parent / "datasets/safety")}
 

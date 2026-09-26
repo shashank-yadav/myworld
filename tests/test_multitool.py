@@ -4,8 +4,8 @@ import time
 
 import pytest
 
-from toolsim.env import Environment, EnvRun
-from toolsim.rl import ToolEnv
+from myworld.env import Environment, EnvRun
+from myworld.rl import ToolEnv
 
 ALL = ["gmail", "calendar", "slack", "github", "jira", "drive", "linear", "notion"]
 
@@ -218,7 +218,7 @@ def test_old_versions_send_nothing(service, old):
 
 
 def test_generated_colleagues_exist_in_every_tool():
-    from toolsim.noise import people
+    from myworld.noise import people
     run = EnvRun(Environment.from_dict({"name": "w", "rng_seed": 5, "servers": {s: {"noise": True} for s in ALL}}))
     for p in people(5, "acme.com", 10):
         for server, inst in run.instances.items():
@@ -251,7 +251,7 @@ def test_faults_and_notifications_agree_with_what_happened(kind, error, invites)
 
 
 def test_parallel_episodes_in_multi_tool_worlds():
-    from toolsim.rl import EnvPool
+    from myworld.rl import EnvPool
     spec = {"name": "invite", "servers": {"gmail": {}, "calendar": {}},
             "checks": [{"server": "gmail", "state": "mailboxes[john@acme.com].messages",
                         "where": {"subject~": "Invitation: Sync"}, "min": 1}]}

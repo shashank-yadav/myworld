@@ -7,11 +7,11 @@ import time
 import pytest
 from fastapi.testclient import TestClient
 
-from toolsim.core.instance import Instance
-from toolsim.env import Environment, EnvRun, parse_time
-from toolsim.host import HostConfig, create_app
-from toolsim.rl import ToolEnv
-from toolsim.services import get_service
+from myworld.core.instance import Instance
+from myworld.env import Environment, EnvRun, parse_time
+from myworld.host import HostConfig, create_app
+from myworld.rl import ToolEnv
+from myworld.services import get_service
 
 MAIL_LATER = {"name": "t", "servers": {"gmail": {}}, "events": [
     {"server": "gmail", "action": "deliver_email", "at": "+10m",
@@ -113,7 +113,7 @@ def test_host_time_modes():
 
 
 def test_anchoring_a_world_to_the_wall_clock_moves_every_date_by_whole_weeks():
-    from toolsim.env import _shift_text, anchor
+    from myworld.env import _shift_text, anchor
     assert _shift_text("Tue 2026-09-22T11:00:00-07:00, all day 2026-09-24", 21) == \
         "Tue 2026-10-13T11:00:00-07:00, all day 2026-10-15"
     assert _shift_text("RRULE:FREQ=WEEKLY;UNTIL=20261231T000000Z", 7) == "RRULE:FREQ=WEEKLY;UNTIL=20270107T000000Z"

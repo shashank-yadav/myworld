@@ -3,10 +3,10 @@ import json
 
 from fastapi.testclient import TestClient
 
-from toolsim.core import mcp
-from toolsim.core.instance import Instance
-from toolsim.host import create_app
-from toolsim.services import get_service
+from myworld.core import mcp
+from myworld.core.instance import Instance
+from myworld.host import create_app
+from myworld.services import get_service
 
 
 def rpc(i, method, params=None, mid=1):

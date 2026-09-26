@@ -9,7 +9,7 @@ from email.message import EmailMessage
 import pytest
 from fastapi.testclient import TestClient
 
-from toolsim.host import Host, HostConfig, create_app
+from myworld.host import Host, HostConfig, create_app
 
 SPEC = {"name": "w", "servers": {"gmail": {}}, "agents": {"alex": {"as": "alex@acme.com"},
                                                          "john": {"as": "john@acme.com"}}}
@@ -145,7 +145,7 @@ def test_oauth_refresh_and_userinfo(api):
 def test_the_gateway_speaks_real_tls(tmp_path):
     host = Host(HostConfig(gateway_port=0, ca_dir=tmp_path, gateway_passthrough=False))
     try:
-        from toolsim.env import Environment
+        from myworld.env import Environment
         run = host.start_env(Environment.from_dict(SPEC), "w")
         tok = host.credentials("http://x", run=run, agent="alex")["google_access_token"]
         ctx = ssl.create_default_context(cafile=str(host.gateway.ca.cert_path))
@@ -184,7 +184,7 @@ def test_gmail_search_language(api):
 def test_direct_tls_for_clients_that_ignore_proxies(tmp_path):
     host = Host(HostConfig(gateway_port=0, gateway_tls_port=0, ca_dir=tmp_path))
     try:
-        from toolsim.env import Environment
+        from myworld.env import Environment
         run = host.start_env(Environment.from_dict(SPEC), "w")
         tok = host.credentials("http://x", run=run, agent="alex")["google_access_token"]
         ctx = ssl.create_default_context(cafile=str(host.gateway.ca.cert_path))

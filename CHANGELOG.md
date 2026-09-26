@@ -1,13 +1,13 @@
 # Changelog
 
-Service behavior is versioned separately by date (`toolsim versions`); this file tracks the package.
+Service behavior is versioned separately by date (`myworld versions`); this file tracks the package.
 
 ## Unreleased
 
-- **Datasets on worlds:** AutomationBench's public tasks on toolsim (244, graded by its own
+- **Datasets on worlds:** AutomationBench's public tasks on myworld (244, graded by its own
   assertions through a plug-in grader); runtime splits (1104 perturbed: injection, lookalike,
   flaky, outage, timeout-after-send; 241 resume: half a reference run done); 10 counterfactual
-  safety pairs on ClawsBench's themes. `toolsim eval` runs Claude on any of them and saves
+  safety pairs on ClawsBench's themes. `myworld eval` runs Claude on any of them and saves
   replayable runs. Environments can start part-way (`history:`); Drive and Notion seeds may fix ids.
 
 - **Working-condition fixes (found running real processes):** agents' credentials survive host
@@ -22,13 +22,13 @@ Service behavior is versioned separately by date (`toolsim versions`); this file
   a coordinator for many hosts (placement, routing, moves, rebalancing). Real-time replays are
   exact: scheduled and timed events fire at their due time.
 
-- **World runtime (`toolsim.world`):** runs are worlds of components with a journal and checkpoints.
+- **World runtime (`myworld.world`):** runs are worlds of components with a journal and checkpoints.
   Branch at any step, replay with divergence reports (virtual and real time), structural diffs,
   recorded mutations, and checks on any component. New components: `directory`, `sqlite` and
   `remote` (a six-route HTTP protocol, so environments in any language plug in). Timed events can
   mutate components. HTTP: `/envs/{id}/journal|checkpoint|branch|replay|diff|mutate|components`.
 
-- **Real clients, unmodified:** an HTTPS gateway (`toolsim serve --gateway PORT`) serves the Gmail,
+- **Real clients, unmodified:** an HTTPS gateway (`myworld serve --gateway PORT`) serves the Gmail,
   Calendar, Drive, Sheets, Docs, People, OAuth and GitHub (REST + GraphQL) APIs from the simulated
   worlds. Verified with `gog` (OpenClaw), Hermes' `google_api.py` (Google's Python client) and `gh`.
 - **GitHub Actions:** CI runs are workflow runs with jobs, steps, logs (the zip `gh run view
@@ -57,15 +57,15 @@ Service behavior is versioned separately by date (`toolsim versions`); this file
   realtime, parallel episodes. `schedule-with-john` checks no longer pass on seeded or calendar mail;
   a test keeps every bundled environment unsolved at the start.
 
-- **Parallel episodes:** `toolsim.rl.EnvPool` (worker processes, batched reset/step with skips) and
-  `toolsim bench` (reference rollouts; ~340 episodes/s on 8 workers).
+- **Parallel episodes:** `myworld.rl.EnvPool` (worker processes, batched reset/step with skips) and
+  `myworld bench` (reference rollouts; ~340 episodes/s on 8 workers).
 - **Tasks:** 20 families; answer checks guard against stuffing (`max_len`, `not`); `calls: "*"` for
   "changed nothing"; validation also runs an answer-stuffing adversary.
 
 - **Clock modes:** virtual (fast, deterministic; the default) and realtime (follows the wall clock, optionally
   accelerated; events fire between calls). RL episodes get a `wait` tool and `step(..., elapsed=)`.
 - **Layout:** one package per tool (`services/<tool>/`: service, model, tools by area, actions, noise,
-  importer) and a `toolsim.rl` package (episodes, task families).
+  importer) and a `myworld.rl` package (episodes, task families).
 
 Realism gaps closed as new service versions (`2026-09-25.1`; the `2026-09-25` versions are unchanged):
 - **Gmail:** bounces for unknown addresses and typo'd domains, out-of-office and rule-based auto-replies
@@ -80,7 +80,7 @@ Realism gaps closed as new service versions (`2026-09-25.1`; the `2026-09-25` ve
 - **Jira:** 6 agile tools (boards, sprints, sprint issues, create/update sprint), `sprint` in JQL with
   `openSprints()` / `closedSprints()` / `futureSprints()`, Jira's sprint rules.
 - **Drive:** Sheets (cells, A1 ranges, USER_ENTERED vs RAW, formulas, grid limits) and Docs tools.
-- **Task generator** (`toolsim.rl.tasks`, `toolsim tasks`): 12 families, each producing tasks from the seeded
+- **Task generator** (`myworld.rl.tasks`, `myworld tasks`): 12 families, each producing tasks from the seeded
   world with verifiers, `must` constraints and a reference solution; every task is validated (reference 1.0,
   do-nothing below). Checks gain `!key` (negation) and `key~re` (regex). Calendar grading is ~30x faster.
 - **Eventually consistent search** (`2026-09-25.2` for GitHub, Jira, Drive; Notion `2026-09-25.1`): search
@@ -89,9 +89,9 @@ Realism gaps closed as new service versions (`2026-09-25.1`; the `2026-09-25` ve
 - **Linear `2026-09-25.1`:** cycles on issues, team estimate scales, exclusive label groups, cursor pagination.
 - **Notion `2026-09-25.1`:** page access levels (view/comment/edit, inherited), typed data source filters with
   cursors, asynchronous page duplication.
-- **Noise and ambient activity** (`toolsim.noise`): seeded, realistic volume and distractors for Gmail,
+- **Noise and ambient activity** (`myworld.noise`): seeded, realistic volume and distractors for Gmail,
   Slack, Calendar, GitHub, Jira and Drive, and background activity during a run, for per-episode variety.
-- **RL episodes** (`toolsim.rl.ToolEnv`): Gymnasium-style reset/step with a `submit` tool, rewards from
+- **RL episodes** (`myworld.rl.ToolEnv`): Gymnasium-style reset/step with a `submit` tool, rewards from
   checks with `weight` (partial credit) and `must` (hard constraints), `answer` checks (including values
   looked up in the final state), dense rewards, step penalties, fork/snapshot, trajectory export.
   Over HTTP: `seed` on `POST /envs`, and `POST /envs/{id}/submit`.
@@ -103,7 +103,7 @@ Realism gaps closed as new service versions (`2026-09-25.1`; the `2026-09-25` ve
 Production hardening:
 - Tool calls never leave partial writes: any failure, including bugs in a simulated tool, rolls back and
   returns a 500-style error in the service's own shape. Arguments are validated deeply (item types, objects).
-- Host security: optional bearer-token auth (`--token` / `TOOLSIM_TOKEN`, required when binding beyond
+- Host security: optional bearer-token auth (`--token` / `MYWORLD_TOKEN`, required when binding beyond
   localhost), Origin validation (MCP DNS-rebinding guidance), environment files only from `--env-dir`,
   inline specs can't read files, `seed_file` confined to the environment's directory, YAML errors never
   echo file content.

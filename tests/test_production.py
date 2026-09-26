@@ -10,11 +10,11 @@ import pytest
 import uvicorn
 from fastapi.testclient import TestClient
 
-from toolsim.core.instance import Instance
-from toolsim.env import Environment, EnvRun
-from toolsim.host import Host, HostConfig, create_app
-from toolsim.importers import IMPORTERS
-from toolsim.services import get_service
+from myworld.core.instance import Instance
+from myworld.env import Environment, EnvRun
+from myworld.host import Host, HostConfig, create_app
+from myworld.importers import IMPORTERS
+from myworld.services import get_service
 
 ENVS = Path(__file__).parent.parent / "envs"
 
@@ -240,7 +240,7 @@ def test_importer_missing_path_is_a_clear_error(tmp_path):
 
 
 def test_cli_errors_are_messages(tmp_path, capsys):
-    from toolsim.cli import main
+    from myworld.cli import main
     with pytest.raises(SystemExit) as e:
         main(["import", "gmail", str(tmp_path / "missing.mbox")])
     assert e.value.code == 2 and "no such file" in capsys.readouterr().err

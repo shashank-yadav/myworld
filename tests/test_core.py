@@ -2,10 +2,10 @@ import json
 
 import pytest
 
-from toolsim.core.faults import Fault
-from toolsim.core.instance import Instance
-from toolsim.core.tools import ToolError, tool, validate_args
-from toolsim.services import get_service
+from myworld.core.faults import Fault
+from myworld.core.instance import Instance
+from myworld.core.tools import ToolError, tool, validate_args
+from myworld.services import get_service
 
 
 def test_schema_from_signature():

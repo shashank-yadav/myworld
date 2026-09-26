@@ -1,5 +1,5 @@
 [project]
-name = "toolsim"
+name = "myworld"
 version = "0.2.0"
 description = "Simulated replicas of real tools (Gmail, Calendar, Slack, GitHub, ...) for testing and training AI agents"
 readme = "README.md"
@@ -19,7 +19,7 @@ classifiers = [
 ]
 
 [project.scripts]
-toolsim = "toolsim.cli:main"
+myworld = "myworld.cli:main"
 
 [project.optional-dependencies]
 gateway = [
@@ -31,7 +31,7 @@ bench = [
 ]
 
 [tool.uv.build-backend]
-module-name = "toolsim"
+module-name = "myworld"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -51,6 +51,8 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "cryptography>=42",
+    "graphql-core>=3.2",
     "httpx>=0.27",
     "pytest>=8",
 ]

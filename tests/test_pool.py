@@ -2,7 +2,7 @@
 
 import pytest
 
-from toolsim.rl import EnvPool, ToolEnv, run_references, tasks
+from myworld.rl import EnvPool, ToolEnv, run_references, tasks
 
 
 @pytest.fixture(scope="module")

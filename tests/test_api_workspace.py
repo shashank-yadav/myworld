@@ -5,7 +5,7 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 
-from toolsim.host import HostConfig, create_app
+from myworld.host import HostConfig, create_app
 
 SPEC = {"name": "w", "servers": {"gmail": {}, "drive": {}},
         "agents": {"alex": {"as": "alex@acme.com"}, "john": {"as": "john@acme.com"}}}

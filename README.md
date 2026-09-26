@@ -1,29 +1,149 @@
-# toolsim
+# myworld
 
-Real-world RL environments for agents: faithful, stateful replicas of the tools people work in
-(Gmail, Google Calendar, Slack, GitHub, Jira, Google Drive, and Linear and Notion in preview),
-with rewards computed from the resulting world.
+Safe practice worlds for real agent work.
 
-Most of these tools have no test mode, and toy environments don't transfer. toolsim gives every
-episode its own copy of each tool:
-- the same MCP tool names and schemas as the popular real MCP servers;
-- realistic state at realistic volume, and a world that keeps moving;
-- realistic errors, plus failures you can inject on purpose.
+If agents are going to work in real companies, they need realistic companies to practice in.
 
-Every episode is deterministic given its seed, and can be snapshotted and forked.
+myworld creates resettable company worlds for agents: Gmail, Slack, Drive, Calendar, GitHub, Jira,
+Notion, users, permissions, files, messages, spreadsheets, events, seeded business data and the
+small failures that show up in production.
+
+Agents work through the same kind of APIs, tools and MCP servers they would use in the real company.
+The difference is that every action happens in a safe world you can snapshot, fork, replay, diff and
+grade.
 
 ```bash
 uv sync
-uv run toolsim tasks -n 1000 --out tasks.jsonl     # validated tasks, each with verifiers and a reference solution
-uv run toolsim bench -n 200 --workers 8            # play the reference solutions in parallel
+uv run myworld serve --env envs/schedule-with-john.yaml
 ```
+
+For MCP clients that spawn tools directly:
+
+```bash
+uvx myworld stdio gmail
+```
+
+## Why
+
+Live accounts are risky and hard to reset. Shallow mocks do not behave like real products. Simple
+tool-call tests miss what happens in long workflows across multiple apps.
+
+Real work is messy:
+
+- old files look like current files;
+- Slack has the correction but Gmail has the request;
+- spreadsheets have existing schemas, formulas and hidden assumptions;
+- calendar slots disappear while the agent is working;
+- search results lag behind writes;
+- permissions block the obvious action;
+- an API times out after the write actually committed;
+- an email contains malicious or conflicting instructions.
+
+myworld gives agents a place to encounter that mess before they touch production. The first goal is
+simple: initialize a realistic world, point an agent at it, watch what happens, and understand the
+failure. Skills and workflow training can come later.
+
+## How It Works
+
+Create a world, seed it with realistic state, expose it through APIs/MCP/tools, run an agent inside
+it, then inspect what changed.
+
+```text
+practice world
+  ├── seeded Gmail / Slack / Drive / Calendar / GitHub state
+  ├── users, permissions, files, messages and events
+  ├── background activity and production-like issues
+  ├── MCP servers and real API-compatible gateways
+  └── snapshots, forks, replays, diffs and grading
+```
+
+Near term, the goal is to make realistic worlds easy to initialize and run across agent platforms.
+Later, good runs can become reusable skills and workflows for the real environments that matter.
+
+## Example: Messy Invoice Processing
+
+A world contains four invoice emails, one AP policy email, a Slack correction to an invoice amount,
+a blocked-vendor spreadsheet, a pending-invoices worksheet and a misleading vendor update from an
+external sender.
+
+The task:
+
+```text
+Process today's vendor invoices.
+Read the invoices from Gmail.
+Check AP policy and blocked vendors.
+Update the invoice tracker.
+Email the AP lead with the logged total.
+```
+
+A weak agent fails by doing the obvious thing:
+
+```text
+reads one invoice
+misses the Slack correction
+logs the wrong amount
+ignores blocked vendors
+emails the wrong total
+```
+
+Because the whole world is recorded, you can replay the run, inspect the world diff, fork from the
+same starting state and try a better model or workflow.
+
+## Agent Platforms
+
+myworld is meant to meet agents where they already run:
+
+- Codex / ChatGPT agents
+- Claude and other MCP clients
+- OpenAI Agents SDK
+- LangGraph and CrewAI
+- OpenHands, OpenClaw, Hermes, Pi and custom stacks
+
+The core integration is MCP. The same host also exposes a REST control plane for test harnesses,
+graders and RL loops.
+
+Useful entry points:
+
+- local stdio MCP: `myworld stdio gmail`
+- hosted or local HTTP MCP: `myworld serve --env ...`
+- OpenAPI / REST control endpoints
+- API-compatible gateways for real Google/GitHub clients
+- Python package, CLI, Docker image and hosted runtime
+
+The agent platform stays the agent platform. myworld provides the world.
+
+Hermes and OpenClaw setup notes:
+
+- [Hermes integration](docs/integrations/hermes.md)
+- [OpenClaw integration](docs/integrations/openclaw.md)
+- [Publishing checklist](docs/publishing-checklist.md)
+
+```bash
+uv sync
+uv run myworld tasks -n 1000 --out tasks.jsonl     # validated tasks, each with verifiers and a reference solution
+uv run myworld bench -n 200 --workers 8            # play the reference solutions in parallel
+```
+
+## Publishing Checklist
+
+- [x] Package and CLI use the `myworld` name.
+- [x] Local stdio MCP works for single-service practice.
+- [x] HTTP host returns MCP configs for multi-service worlds.
+- [x] REST control plane supports create, snapshot, fork, replay inputs, diff inputs and grading.
+- [x] Dockerfile runs the myworld host with token protection when exposed.
+- [x] Hermes config example exists in `examples/hermes/`.
+- [x] OpenClaw install script exists in `examples/openclaw/`.
+- [ ] Publish `myworld` to PyPI for `uvx myworld`.
+- [ ] Publish `ghcr.io/<org>/myworld`.
+- [ ] Deploy a hosted MCP endpoint at `https://api.myworld.dev/mcp`.
+- [ ] Add release smoke tests against Hermes and `openclaw mcp doctor --probe`.
 
 ## RL
 
 ### Episodes
 
 ```python
-from toolsim.rl import ToolEnv
+from myworld.rl import ToolEnv
 
 env = ToolEnv("envs/merge-when-green.yaml", max_steps=30)
 obs, info = env.reset(seed=7)                 # obs["task"], obs["tools"] (Anthropic/OpenAI-ready)
@@ -50,8 +170,8 @@ env.trajectory()                              # steps, world events, answer, per
 
 ### Tasks
 
-`toolsim tasks -n 5000 --out tasks.jsonl` (or `toolsim.rl.generate`) writes tasks from 20
-families (`toolsim tasks --list`), for single tools and across tools:
+`myworld tasks -n 5000 --out tasks.jsonl` (or `myworld.rl.generate`) writes tasks from 20
+families (`myworld tasks --list`), for single tools and across tools:
 - reply to a colleague;
 - archive one sender and nothing else;
 - book a slot you're both free for;
@@ -78,7 +198,7 @@ Every task is validated before it's kept:
 ### Parallel episodes
 
 ```python
-from toolsim.rl import EnvPool, generate
+from myworld.rl import EnvPool, generate
 
 with EnvPool(workers=8, max_steps=40) as pool:
     observations = pool.reset(generate(256, seed=0))        # [(obs, info)] per episode
@@ -87,7 +207,7 @@ with EnvPool(workers=8, max_steps=40) as pool:
 ```
 
 Each episode stays in one worker process for its whole life. On a 10-core laptop, reference
-rollouts ran at about 340 episodes/s (1,000+ steps/s) with 8 workers (`toolsim bench`).
+rollouts ran at about 340 episodes/s (1,000+ steps/s) with 8 workers (`myworld bench`).
 
 ### Over HTTP
 
@@ -118,11 +238,11 @@ Each service is a *workspace*, not one account:
 
 **Versions:** each service has date-based versions (e.g. `gmail@2026-09-25`, `github@2026-09-25.2`),
 and environments can pin one (`gmail: {version: 2026-09-25}`).
-- Every released version is frozen in `src/toolsim/frozen/`: its tool definitions plus a hash of its
+- Every released version is frozen in `src/myworld/frozen/`: its tool definitions plus a hash of its
   behavior on a fixed probe script.
 - The tests fail if the code changes what a released version does, so every change ships as a
   new version.
-- `toolsim versions` shows the status, and `toolsim freeze` freezes new versions.
+- `myworld versions` shows the status, and `myworld freeze` freezes new versions.
 
 ## Worlds
 
@@ -245,8 +365,8 @@ A harness can also inject events into a live run (`POST /envs/{id}/events`).
   - Use it for live agents over MCP and demos. It isn't deterministic.
 
 Set the mode per environment (`time: realtime`, `time: {speed: 60}`), per run
-(`POST /envs {"time": ...}`), or as a host default (`toolsim serve --time realtime`,
-`toolsim stdio gmail --time 60`).
+(`POST /envs {"time": ...}`), or as a host default (`myworld serve --time realtime`,
+`myworld stdio gmail --time 60`).
 
 ### Issues: realistic trouble, one line each
 
@@ -259,7 +379,7 @@ issues:
     params: {server: gmail, tool: send_email, from_call: 1, until_call: 2}
 ```
 
-Each issue expands into events, faults and `[issue: …]` checks. `toolsim issues` lists all 18:
+Each issue expands into events, faults and `[issue: …]` checks. `myworld issues` lists all 18:
 - **Data and security:** prompt injection, lookalike sender, similar names.
 - **Races:** the slot gets taken, CI flips before merge, the base branch moves, access is
   revoked, a document goes stale, the requester changes their mind.
@@ -288,12 +408,12 @@ A fault fires on the Nth call, with a seeded probability, or throughout a window
 ### From real data
 
 ```bash
-toolsim import gmail    "Takeout/Mail/All mail.mbox"  -o seeds/gmail.yaml --anonymize --map people.json
-toolsim import calendar Takeout/Calendar/me.ics       -o seeds/calendar.yaml --anonymize --map people.json
-toolsim import slack    acme-slack-export.zip         -o seeds/slack.yaml --anonymize --map people.json
-toolsim import github   ~/src/api --issues issues.json --pulls prs.json -o seeds/github.yaml
-toolsim import jira     jira-export.csv               -o seeds/jira.yaml --me "Dana Wu"
-toolsim import drive    Takeout/Drive                 -o seeds/drive.yaml
+myworld import gmail    "Takeout/Mail/All mail.mbox"  -o seeds/gmail.yaml --anonymize --map people.json
+myworld import calendar Takeout/Calendar/me.ics       -o seeds/calendar.yaml --anonymize --map people.json
+myworld import slack    acme-slack-export.zip         -o seeds/slack.yaml --anonymize --map people.json
+myworld import github   ~/src/api --issues issues.json --pulls prs.json -o seeds/github.yaml
+myworld import jira     jira-export.csv               -o seeds/jira.yaml --me "Dana Wu"
+myworld import drive    Takeout/Drive                 -o seeds/drive.yaml
 ```
 
 No accounts or API access are needed. Options:
@@ -312,7 +432,7 @@ thing, whatever its components are.
 
 - **Components:** simulated services, plus `directory` (e.g. the agent's workspace), `sqlite`
   (e.g. an app's database) and `remote`: any process, in any language, that speaks a six-route
-  HTTP protocol (`toolsim.world.adapters`; `serve_component` exposes a Python component that way).
+  HTTP protocol (`myworld.world.adapters`; `serve_component` exposes a Python component that way).
   A component implements `snapshot`, `restore`, `clone`, `view`, `mutate` and `mutations`.
 - **Journal:** calls (MCP and REST), injected events, mutations, waits and, in real-time runs, the
   passage of wall time.
@@ -343,13 +463,13 @@ checks:
   task depends on belongs in semantic components, where it can be diffed, mutated and graded. For
   memory-level fidelity, plug a VM backend (Firecracker, CRIU, a hosted VM service) into the same
   templates.
-- **Durable, copy-on-write storage:** `toolsim serve --store worlds.db` keeps checkpoints in a
+- **Durable, copy-on-write storage:** `myworld serve --store worlds.db` keeps checkpoints in a
   content-addressed store where unchanged subtrees are shared, so a checkpoint per step is cheap.
   `/envs/{id}/save` and `/envs/load` keep runs across restarts; `/envs/{id}/export` and
   `/envs/import` move them between machines.
   Saved runs survive restarts along with their agents' credentials; a real-time run that was stored
   catches up to the wall clock when loaded. `POST /store/gc` frees what nothing references.
-- **Many machines:** `toolsim coordinator --worker URL --worker URL` places runs on the
+- **Many machines:** `myworld coordinator --worker URL --worker URL` places runs on the
   least-loaded host, routes each run's requests to its host, moves runs (`/envs/{id}/move`) and
   rebalances (`/cluster/rebalance`). By default agents talk to their host directly; with
   `--proxy-agents` they get the coordinator's URLs, which keep working when their run moves. Give
@@ -361,33 +481,35 @@ replayed, only checkpointed; RL episodes checkpoint after every step when a run 
 
 ## Datasets: benchmarks on worlds
 
-`datasets/` puts two recent benchmarks' ideas on toolsim worlds and adds splits only a world
+`datasets/` puts two recent benchmarks' ideas on myworld worlds and adds splits only a world
 runtime can make (details in each folder's README):
 
 | dataset | items | from |
 |---|---|---|
-| `automationbench` | 244 | [AutomationBench](https://github.com/zapier/AutomationBench) (MIT): every public task whose apps toolsim simulates, graded by its own assertions |
+| `automationbench` | 244 | [AutomationBench](https://github.com/zapier/AutomationBench) (MIT): every public task whose apps myworld simulates, graded by its own assertions |
 | `automationbench-runtime` | 1104 perturbed, 241 resume | those tasks with a planted injection, an impersonated colleague, flaky/down APIs or a timeout-after-send (**mutate**), or started half-way through a reference run (**snapshot, fork**) |
 | `safety` | 10 pairs (20 worlds) | original scenarios on [ClawsBench](https://github.com/benchflow-ai/ClawsBench)'s themes, each a **counterfactual** pair: the sensitive action is right in one world and unauthorized in the other |
 
 ```bash
-pip install 'toolsim[bench]'; export ANTHROPIC_API_KEY=...
-toolsim eval datasets/automationbench --model claude-opus-5 --limit 20 -o results/ab
-toolsim eval datasets/automationbench-runtime --only resume,injection
-toolsim eval datasets/safety
+pip install 'myworld[bench]'; export ANTHROPIC_API_KEY=...
+myworld eval datasets/automationbench --model claude-opus-5 --limit 20 -o results/ab
+OPENROUTER_API_KEY=... myworld eval datasets/automationbench --provider openrouter --model qwen/qwen3-32b -o results/qwen
+myworld eval datasets/automationbench-runtime --only resume,injection
+myworld eval datasets/safety
 ```
 
 `eval` reports pass rate (AutomationBench's metric), mean partial credit and unauthorized action
-rate per split, plus pair accuracy for the safety pairs. Every run is saved with its journal
+rate per split, plus strict pass rate over attempted items, error rate, loop/error diagnostics and
+pair accuracy for the safety pairs. Every run is saved with its journal
 (`results/runs/<item>.json`), so a result can be **replayed** exactly, forked at any step or
-regraded. Grading AutomationBench tasks needs its code (`TOOLSIM_AUTOMATIONBENCH=<checkout>`).
-Plug-in graders (`toolsim.graders`) run any benchmark's own rubric on a toolsim world, and
+regraded. Grading AutomationBench tasks needs its code (`MYWORLD_AUTOMATIONBENCH=<checkout>`).
+Plug-in graders (`myworld.graders`) run any benchmark's own rubric on a myworld world, and
 `history:` starts an environment part-way through another run.
 
 ## Real clients: gog, gh, Hermes, OpenClaw
 
 Agents like OpenClaw and Hermes don't call MCP servers for Google and GitHub; they run CLIs
-(`gog`, `gh`) or Google's client libraries. toolsim serves the real APIs, so those run unmodified:
+(`gog`, `gh`) or Google's client libraries. myworld serves the real APIs, so those run unmodified:
 
 | API | Hosts | What's there |
 |---|---|---|
@@ -404,7 +526,7 @@ Calls are recorded under the API's method ids (`gmail.users.messages.send`, `git
 
 ```bash
 uv sync --extra gateway
-uv run toolsim serve --env envs/schedule-with-john.yaml --gateway 8443
+uv run myworld serve --env envs/schedule-with-john.yaml --gateway 8443
 # prints, per agent:  export HTTPS_PROXY=... SSL_CERT_FILE=... GOG_ACCESS_TOKEN=... GOG_ACCOUNT=... GH_TOKEN=...
 gog gmail search 'is:unread' --max 10      # in the agent's sandbox, with those variables
 gh pr checks 4 --repo acme/api
@@ -420,8 +542,8 @@ gh pr checks 4 --repo acme/api
 - **Clients that ignore proxies:** `--gateway-tls PORT` also serves TLS directly, choosing the
   certificate by SNI; point the API hosts at it (`Gateway.hosts_file()` prints the `/etc/hosts` lines).
 - **Without TLS:** `http://<host>/gw/<api host>/<path>` serves the same APIs over plain HTTP.
-- **Regression tests with the real binaries:** `TOOLSIM_CLIENTS_BIN=<dir with gog, gh>
-  TOOLSIM_HERMES_API="<python> <google_api.py>" pytest tests/test_real_clients.py`.
+- **Regression tests with the real binaries:** `MYWORLD_CLIENTS_BIN=<dir with gog, gh>
+  MYWORLD_HERMES_API="<python> <google_api.py>" pytest tests/test_real_clients.py`.
 - **Known gaps:** `git push`/`git clone` (git's own protocol) isn't simulated; use the API
   (`gh api .../contents`). Python's httplib2 (Google's client) honors `HTTPS_PROXY` only with
   `pysocks` installed.
@@ -429,10 +551,10 @@ gh pr checks 4 --repo acme/api
 ## Run and deploy
 
 ```bash
-uv run toolsim serve --env envs/schedule-with-john.yaml  # prints each agent's task and MCP config
-uv run toolsim grade envs/schedule-with-john.yaml        # after the agents finish
-uv run toolsim stdio gmail                               # one instance over stdio, for command-configured MCP clients
-docker build -t toolsim . && docker run -e TOOLSIM_TOKEN=change-me -p 8765:8765 toolsim
+uv run myworld serve --env envs/schedule-with-john.yaml  # prints each agent's task and MCP config
+uv run myworld grade envs/schedule-with-john.yaml        # after the agents finish
+uv run myworld stdio gmail                               # one instance over stdio, for command-configured MCP clients
+docker build -t myworld . && docker run -e MYWORLD_TOKEN=change-me -p 8765:8765 myworld
 ```
 
 The control API (`/docs`) covers environments, instances, snapshots, forks, events, time, grading
@@ -452,7 +574,7 @@ restarts.
 ## Code layout
 
 ```
-src/toolsim/
+src/myworld/
   core/          the engine: instances, clock, tools and validation, faults, MCP
   services/      one package per tool: service, model, tools by area, REST api, world actions, noise, importer
   world/         the world runtime: components (directory, sqlite, remote, command/docker), journal,
@@ -468,7 +590,7 @@ src/toolsim/
   api/           REST surfaces: routing, Google helpers, the HTTP handler, a GraphQL executor
   gateway/       the HTTPS gateway (CA, proxy) for real clients
   host.py        HTTP host (MCP endpoints and control API)
-  cli.py         toolsim ...
+  cli.py         myworld ...
   frozen/        fingerprints of every released service version
 ```
 

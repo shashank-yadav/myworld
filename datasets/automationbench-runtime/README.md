@@ -1,7 +1,7 @@
 # AutomationBench, runtime splits
 
-Built from `../automationbench` by `toolsim.bench.splits` with the reference solver. Each line is
-an overlay on a base task (`{"name", "base", "overlay"}`); `toolsim.bench.splits.load(folder)`
+Built from `../automationbench` by `myworld.bench.splits` with the reference solver. Each line is
+an overlay on a base task (`{"name", "base", "overlay"}`); `myworld.bench.splits.load(folder)`
 returns plain environment specs. Scores are AutomationBench's partial credit; the checks each split
 adds are hard constraints (`must`): violating one makes the reward 0.
 
