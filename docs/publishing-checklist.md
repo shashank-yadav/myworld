@@ -34,6 +34,11 @@ clients.
 
 - [x] Add `docs/integrations/openclaw.md`.
 - [x] Add `examples/openclaw/install.sh`.
+- [x] Prepare ClawHub package at `packaging/clawhub/openclaw-myworld`.
+- [x] Keep OpenClaw core PR out of scope; publish as an installable ClawHub package.
+- [x] Run `clawhub package validate ./packaging/clawhub/openclaw-myworld`.
+- [x] Run `clawhub package publish ./packaging/clawhub/openclaw-myworld --family code-plugin --dry-run`.
+- [ ] Publish `clawhub:@shashank-yadav/openclaw-myworld`.
 - [ ] Run `openclaw mcp doctor myworld-gmail --probe` from a clean install.
 - [ ] Run the hosted config with `openclaw mcp set ...`.
 - [ ] Add an OpenClaw smoke run to release notes.
@@ -54,4 +59,3 @@ clients.
 - [ ] `uv build`
 - [ ] `uv run myworld versions`
 - [ ] Load `examples/worlds/invoice-review.yaml`
-

@@ -116,7 +116,7 @@ The agent platform stays the agent platform. myworld provides the world.
 Hermes and OpenClaw setup notes:
 
 - [Hermes integration](docs/integrations/hermes.md)
-- [OpenClaw integration](docs/integrations/openclaw.md)
+- [OpenClaw / ClawHub integration](docs/integrations/openclaw.md)
 - [Publishing checklist](docs/publishing-checklist.md)
 
 ```bash
@@ -133,8 +133,10 @@ uv run myworld bench -n 200 --workers 8            # play the reference solution
 - [x] REST control plane supports create, snapshot, fork, replay inputs, diff inputs and grading.
 - [x] Dockerfile runs the myworld host with token protection when exposed.
 - [x] Hermes config example exists in `examples/hermes/`.
-- [x] OpenClaw install script exists in `examples/openclaw/`.
+- [x] OpenClaw direct install script exists in `examples/openclaw/`.
+- [x] ClawHub package exists in `packaging/clawhub/openclaw-myworld/`.
 - [x] Publish `myworld` to PyPI for `uvx myworld`.
+- [ ] Publish `clawhub:@shashank-yadav/openclaw-myworld`.
 - [ ] Publish `ghcr.io/<org>/myworld`.
 - [ ] Deploy a hosted MCP endpoint at `https://api.myworld.dev/mcp`.
 - [ ] Add release smoke tests against Hermes and `openclaw mcp doctor --probe`.

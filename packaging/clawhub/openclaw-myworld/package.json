@@ -1,0 +1,42 @@
+{
+  "name": "@shashank-yadav/openclaw-myworld",
+  "version": "0.2.1",
+  "description": "myworld practice-world MCP integration for OpenClaw",
+  "type": "module",
+  "private": false,
+  "license": "MIT",
+  "homepage": "https://github.com/shashank-yadav/myworld",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shashank-yadav/myworld.git",
+    "directory": "packaging/clawhub/openclaw-myworld"
+  },
+  "keywords": [
+    "openclaw",
+    "clawhub",
+    "mcp",
+    "agents",
+    "evaluation",
+    "myworld"
+  ],
+  "peerDependencies": {
+    "openclaw": ">=2026.3.24-beta.2"
+  },
+  "openclaw": {
+    "extensions": [
+      "./index.ts"
+    ],
+    "compat": {
+      "pluginApi": ">=2026.3.24-beta.2",
+      "minGatewayVersion": "2026.3.24-beta.2"
+    },
+    "build": {
+      "openclawVersion": "2026.3.24-beta.2",
+      "pluginSdkVersion": "2026.3.24-beta.2"
+    },
+    "environment": {
+      "network": "none",
+      "secrets": []
+    }
+  }
+}

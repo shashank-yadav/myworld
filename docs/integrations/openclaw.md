@@ -1,14 +1,47 @@
 # OpenClaw
 
-OpenClaw can save myworld as an MCP server and probe it before an agent uses it. The clean path is
-to publish both a local stdio command and a hosted `streamable-http` endpoint.
+OpenClaw can use myworld as an MCP server. The core OpenClaw repo is not the right place for this
+integration because myworld is an optional practice environment, not a missing core API. The right
+publish path is ClawHub.
+
+## ClawHub Package
+
+The ClawHub-ready package lives at:
+
+```text
+packaging/clawhub/openclaw-myworld
+```
+
+It declares one stdio MCP server:
+
+```bash
+uvx myworld==0.2.1 world invoice-review
+```
+
+Publish flow:
+
+```bash
+npm i -g clawhub
+clawhub login
+clawhub package validate ./packaging/clawhub/openclaw-myworld
+clawhub package publish ./packaging/clawhub/openclaw-myworld --family code-plugin --dry-run
+clawhub package publish ./packaging/clawhub/openclaw-myworld --family code-plugin --wait
+```
+
+After publication:
+
+```bash
+openclaw plugins install clawhub:@shashank-yadav/openclaw-myworld
+```
 
 ## Local Stdio
+
+For users who do not want the ClawHub package yet, the direct MCP command still works:
 
 ```bash
 openclaw mcp add myworld \
   --command uvx \
-  --arg myworld \
+  --arg myworld==0.2.1 \
   --arg world \
   --arg invoice-review \
   --include 'world_*,gmail__*,slack__*,drive__*'
@@ -34,8 +67,10 @@ The hosted endpoint should expose world-control tools (`world_create`, `world_fo
 
 ## Publish Checklist
 
-- Provide a copy-paste `openclaw mcp add` command for local use.
-- Provide a copy-paste `openclaw mcp set` command for the hosted endpoint.
-- Add `openclaw mcp doctor --probe` to release testing.
-- Keep examples scoped with `--include` filters.
-- Add a short "known messy failures" page so users can see why practice worlds matter.
+- [x] Package as a ClawHub code plugin instead of an OpenClaw core PR.
+- [x] Pin the Python package launched through `uvx`.
+- [x] Document runtime, permissions, secrets and smoke test.
+- [x] Run `clawhub package validate ./packaging/clawhub/openclaw-myworld`.
+- [x] Run `clawhub package publish ./packaging/clawhub/openclaw-myworld --family code-plugin --dry-run`.
+- [ ] Publish after ClawHub login/token setup.
+- [ ] Add `openclaw mcp doctor --probe` to release testing.
