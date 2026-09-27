@@ -26,6 +26,8 @@ clients.
 
 - [x] Add `docs/integrations/hermes.md`.
 - [x] Add `examples/hermes/mcp.yaml`.
+- [x] Add official Hermes catalog assets under `packaging/hermes/optional-mcps`.
+- [x] Add community Hermes Registry entry under `packaging/hermes-registry/mcp/myworld`.
 - [ ] Run Hermes against the stdio example and capture the exact setup output.
 - [ ] Run Hermes against a multi-service world over HTTP.
 - [ ] Publish a short example task showing the agent failure and replay.

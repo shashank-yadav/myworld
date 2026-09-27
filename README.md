@@ -133,6 +133,7 @@ uv run myworld bench -n 200 --workers 8            # play the reference solution
 - [x] REST control plane supports create, snapshot, fork, replay inputs, diff inputs and grading.
 - [x] Dockerfile runs the myworld host with token protection when exposed.
 - [x] Hermes config example exists in `examples/hermes/`.
+- [x] Hermes catalog and community registry package assets exist in `packaging/hermes*/`.
 - [x] OpenClaw direct install script exists in `examples/openclaw/`.
 - [x] ClawHub package exists in `packaging/clawhub/openclaw-myworld/`.
 - [x] Publish `myworld` to PyPI for `uvx myworld`.

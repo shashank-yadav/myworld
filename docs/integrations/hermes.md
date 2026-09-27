@@ -3,6 +3,26 @@
 Hermes can use myworld through MCP. Start with one practice world, expose only the tools the
 agent needs, then widen the surface when the workflow is stable.
 
+## Distribution Paths
+
+Hermes has two catalog-style paths:
+
+- Official Hermes catalog: `NousResearch/hermes-agent` accepts PRs under `optional-mcps/`.
+- Community Hermes Registry: `hermesonehq/hermes-registry` accepts entries under `mcp/<name>/`.
+
+This repo carries both package shapes:
+
+```text
+packaging/hermes/optional-mcps/myworld/manifest.yaml
+packaging/hermes-registry/mcp/myworld/manifest.json
+```
+
+Both launch the same pinned local MCP server:
+
+```bash
+uvx myworld==0.2.1 world invoice-review
+```
+
 ## Local Stdio
 
 Use this when Hermes and myworld run on the same machine.
@@ -52,6 +72,8 @@ etc.) or use the hosted myworld endpoint once it is deployed. For local stdio, p
 ## Publish Checklist
 
 - Ship a PyPI package so Hermes users can run `uvx myworld ...`.
+- Keep the official Hermes optional-MCP PR assets in `packaging/hermes/`.
+- Keep the community Hermes Registry entry in `packaging/hermes-registry/`.
 - Publish a Docker image for teams that want a long-running HTTP host.
 - Keep the default examples narrow and low-risk.
 - Document tool filters for every example.
